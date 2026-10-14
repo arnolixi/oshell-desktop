@@ -1,0 +1,14 @@
+{
+  "name": "OShell Desktop",
+  "identifier": "dev.oshell.desktop",
+  "version": "0.3.0",
+  "out": "dist",
+  "icon": "resources/icon.png",
+  "resources": [
+    "LICENSE",
+    "THIRD_PARTY_NOTICES.md"
+  ],
+  "macos": {
+    "minimumSystemVersion": "13.0"
+  }
+}

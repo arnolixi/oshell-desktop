@@ -1,0 +1,161 @@
+// SPDX-License-Identifier: GPL-3.0-only
+package core
+
+import (
+	"context"
+	"fmt"
+	"io"
+	"net"
+	"os"
+	"os/exec"
+	"runtime"
+	"strconv"
+	"strings"
+	"sync"
+	"time"
+)
+
+type commandConn struct {
+	reader  io.ReadCloser
+	writer  io.WriteCloser
+	command *exec.Cmd
+	done    chan struct{}
+	once    sync.Once
+}
+
+func (c *commandConn) Read(p []byte) (int, error)  { return c.reader.Read(p) }
+func (c *commandConn) Write(p []byte) (int, error) { return c.writer.Write(p) }
+func (c *commandConn) Close() error {
+	c.once.Do(func() {
+		c.writer.Close()
+		c.reader.Close()
+		select {
+		case <-c.done:
+		default:
+			stopCommand(c.command)
+		}
+	})
+	return nil
+}
+func (c *commandConn) LocalAddr() net.Addr              { return proxyAddr("local proxy command") }
+func (c *commandConn) RemoteAddr() net.Addr             { return proxyAddr("SSH proxy command") }
+func (c *commandConn) SetDeadline(time.Time) error      { return nil }
+func (c *commandConn) SetReadDeadline(time.Time) error  { return nil }
+func (c *commandConn) SetWriteDeadline(time.Time) error { return nil }
+
+type proxyAddr string
+
+func (proxyAddr) Network() string  { return "proxy-command" }
+func (p proxyAddr) String() string { return string(p) }
+
+// The command originates only from the user's OpenSSH configuration, never
+// from imported session fields or remote terminal output.
+func dialProxyCommand(ctx context.Context, template string, p Profile) (net.Conn, error) {
+	if strings.ContainsAny(template, "\x00\r\n") {
+		return nil, fmt.Errorf("ProxyCommand 包含不支持的字符")
+	}
+	command, e := expandProxyCommand(template, p)
+	if e != nil {
+		return nil, e
+	}
+	var cmd *exec.Cmd
+	if runtime.GOOS == "windows" {
+		cmd = exec.CommandContext(ctx, "cmd.exe", "/d", "/s", "/c", command)
+	} else {
+		cmd = exec.CommandContext(ctx, "/bin/sh", "-c", command)
+	}
+	prepareCommand(cmd)
+	inRead, input, e := os.Pipe()
+	if e != nil {
+		return nil, e
+	}
+	output, outWrite, e := os.Pipe()
+	if e != nil {
+		inRead.Close()
+		input.Close()
+		return nil, e
+	}
+	cmd.Stdin = inRead
+	cmd.Stdout = outWrite
+	cmd.Stderr = io.Discard
+	if e = cmd.Start(); e != nil {
+		inRead.Close()
+		input.Close()
+		output.Close()
+		outWrite.Close()
+		return nil, e
+	}
+	inRead.Close()
+	outWrite.Close()
+	c := &commandConn{reader: output, writer: input, command: cmd, done: make(chan struct{})}
+	go func() { cmd.Wait(); close(c.done) }()
+	return c, nil
+}
+
+func expandProxyCommand(template string, p Profile) (string, error) {
+	values := map[byte]string{'h': p.Host, 'p': strconv.Itoa(p.Port), 'r': p.Username}
+	if runtime.GOOS == "windows" {
+		for _, v := range values {
+			if strings.ContainsAny(v, "&|<>^%!\"\r\n") {
+				return "", fmt.Errorf("ProxyCommand 身份字段含有不安全的命令字符")
+			}
+		}
+		s := strings.NewReplacer("%%", "\x01", "%h", p.Host, "%p", strconv.Itoa(p.Port), "%r", p.Username).Replace(template)
+		return strings.ReplaceAll(s, "\x01", "%"), nil
+	}
+	var out strings.Builder
+	quote := byte(0)
+	for i := 0; i < len(template); i++ {
+		b := template[i]
+		if b == '\\' && quote != '\'' && i+1 < len(template) {
+			out.WriteByte(b)
+			i++
+			out.WriteByte(template[i])
+			continue
+		}
+		if b == '\'' && quote != '"' {
+			if quote == '\'' {
+				quote = 0
+			} else {
+				quote = '\''
+			}
+			out.WriteByte(b)
+			continue
+		}
+		if b == '"' && quote != '\'' {
+			if quote == '"' {
+				quote = 0
+			} else {
+				quote = '"'
+			}
+			out.WriteByte(b)
+			continue
+		}
+		if b == '%' && i+1 < len(template) {
+			i++
+			code := template[i]
+			if code == '%' {
+				out.WriteByte('%')
+				continue
+			}
+			v, ok := values[code]
+			if !ok {
+				return "", fmt.Errorf("不支持的 ProxyCommand 变量 %%%c", code)
+			}
+			switch quote {
+			case '\'':
+				out.WriteString(strings.ReplaceAll(v, "'", `'\''`))
+			case '"':
+				out.WriteString(strings.NewReplacer(`\`, `\\`, "$", `\$`, "`", "\\`", `"`, `\"`).Replace(v))
+			default:
+				out.WriteString(shellQuote(v))
+			}
+			continue
+		}
+		out.WriteByte(b)
+	}
+	if quote != 0 {
+		return "", fmt.Errorf("ProxyCommand 引号不完整")
+	}
+	return out.String(), nil
+}

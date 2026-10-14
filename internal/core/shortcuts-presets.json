@@ -1,0 +1,520 @@
+[
+  {
+    "id": "newWindow",
+    "title": "新建窗口",
+    "defaults": [
+      {
+        "keyCode": 45,
+        "modifiers": 9
+      }
+    ]
+  },
+  {
+    "id": "settings",
+    "title": "App 设置",
+    "defaults": [
+      {
+        "keyCode": 43,
+        "modifiers": 1
+      }
+    ]
+  },
+  {
+    "id": "sessionManager",
+    "title": "会话管理",
+    "defaults": [
+      {
+        "keyCode": 31,
+        "modifiers": 9
+      }
+    ]
+  },
+  {
+    "id": "connectSelected",
+    "title": "连接会话管理中的选中会话",
+    "defaults": [
+      {
+        "keyCode": 36,
+        "modifiers": 1
+      }
+    ]
+  },
+  {
+    "id": "newSession",
+    "title": "新建会话配置",
+    "defaults": [
+      {
+        "keyCode": 45,
+        "modifiers": 1
+      }
+    ]
+  },
+  {
+    "id": "newBlank",
+    "title": "新建空白标签",
+    "defaults": []
+  },
+  {
+    "id": "local",
+    "title": "新建本地终端",
+    "defaults": [
+      {
+        "keyCode": 17,
+        "modifiers": 1
+      }
+    ]
+  },
+  {
+    "id": "currentProperties",
+    "title": "当前会话完整属性",
+    "defaults": []
+  },
+  {
+    "id": "liveProperties",
+    "title": "当前会话空闲保活",
+    "defaults": []
+  },
+  {
+    "id": "defaults",
+    "title": "默认会话属性",
+    "defaults": []
+  },
+  {
+    "id": "importSessions",
+    "title": "导入会话",
+    "defaults": []
+  },
+  {
+    "id": "exportSessions",
+    "title": "导出全部会话",
+    "defaults": []
+  },
+  {
+    "id": "reconnect",
+    "title": "重新连接",
+    "defaults": [
+      {
+        "keyCode": 15,
+        "modifiers": 9
+      }
+    ]
+  },
+  {
+    "id": "closePane",
+    "title": "关闭当前分屏",
+    "defaults": [
+      {
+        "keyCode": 13,
+        "modifiers": 1
+      }
+    ]
+  },
+  {
+    "id": "closeTab",
+    "title": "关闭当前标签",
+    "defaults": [
+      {
+        "keyCode": 13,
+        "modifiers": 9
+      }
+    ]
+  },
+  {
+    "id": "copy",
+    "title": "复制",
+    "defaults": [
+      {
+        "keyCode": 8,
+        "modifiers": 1
+      }
+    ]
+  },
+  {
+    "id": "paste",
+    "title": "粘贴",
+    "defaults": [
+      {
+        "keyCode": 9,
+        "modifiers": 1
+      }
+    ]
+  },
+  {
+    "id": "selectAll",
+    "title": "全选",
+    "defaults": [
+      {
+        "keyCode": 0,
+        "modifiers": 1
+      }
+    ]
+  },
+  {
+    "id": "find",
+    "title": "搜索",
+    "defaults": [
+      {
+        "keyCode": 3,
+        "modifiers": 1
+      }
+    ]
+  },
+  {
+    "id": "findNext",
+    "title": "下一个匹配",
+    "defaults": [
+      {
+        "keyCode": 5,
+        "modifiers": 1
+      }
+    ]
+  },
+  {
+    "id": "findPrevious",
+    "title": "上一个匹配",
+    "defaults": [
+      {
+        "keyCode": 5,
+        "modifiers": 9
+      }
+    ]
+  },
+  {
+    "id": "splitVertical",
+    "title": "新建左右分屏",
+    "defaults": [
+      {
+        "keyCode": 2,
+        "modifiers": 1
+      }
+    ]
+  },
+  {
+    "id": "splitHorizontal",
+    "title": "新建上下分屏",
+    "defaults": [
+      {
+        "keyCode": 2,
+        "modifiers": 9
+      }
+    ]
+  },
+  {
+    "id": "logging",
+    "title": "开始 / 停止日志记录",
+    "defaults": [
+      {
+        "keyCode": 37,
+        "modifiers": 9
+      }
+    ]
+  },
+  {
+    "id": "nextTab",
+    "title": "下一个标签",
+    "defaults": [
+      {
+        "keyCode": 48,
+        "modifiers": 4
+      },
+      {
+        "keyCode": 30,
+        "modifiers": 9
+      }
+    ]
+  },
+  {
+    "id": "previousTab",
+    "title": "上一个标签",
+    "defaults": [
+      {
+        "keyCode": 48,
+        "modifiers": 12
+      },
+      {
+        "keyCode": 33,
+        "modifiers": 9
+      }
+    ]
+  },
+  {
+    "id": "recentTab",
+    "title": "切回最近使用的标签",
+    "defaults": [
+      {
+        "keyCode": 50,
+        "modifiers": 4
+      }
+    ]
+  },
+  {
+    "id": "tab1",
+    "title": "跳到当前分组标签 1",
+    "defaults": [
+      {
+        "keyCode": 18,
+        "modifiers": 1
+      }
+    ]
+  },
+  {
+    "id": "tab2",
+    "title": "跳到当前分组标签 2",
+    "defaults": [
+      {
+        "keyCode": 19,
+        "modifiers": 1
+      }
+    ]
+  },
+  {
+    "id": "tab3",
+    "title": "跳到当前分组标签 3",
+    "defaults": [
+      {
+        "keyCode": 20,
+        "modifiers": 1
+      }
+    ]
+  },
+  {
+    "id": "tab4",
+    "title": "跳到当前分组标签 4",
+    "defaults": [
+      {
+        "keyCode": 21,
+        "modifiers": 1
+      }
+    ]
+  },
+  {
+    "id": "tab5",
+    "title": "跳到当前分组标签 5",
+    "defaults": [
+      {
+        "keyCode": 23,
+        "modifiers": 1
+      }
+    ]
+  },
+  {
+    "id": "tab6",
+    "title": "跳到当前分组标签 6",
+    "defaults": [
+      {
+        "keyCode": 22,
+        "modifiers": 1
+      }
+    ]
+  },
+  {
+    "id": "tab7",
+    "title": "跳到当前分组标签 7",
+    "defaults": [
+      {
+        "keyCode": 26,
+        "modifiers": 1
+      }
+    ]
+  },
+  {
+    "id": "tab8",
+    "title": "跳到当前分组标签 8",
+    "defaults": [
+      {
+        "keyCode": 28,
+        "modifiers": 1
+      }
+    ]
+  },
+  {
+    "id": "tab9",
+    "title": "跳到当前分组标签 9",
+    "defaults": [
+      {
+        "keyCode": 25,
+        "modifiers": 1
+      }
+    ]
+  },
+  {
+    "id": "tabNumber",
+    "title": "输入标签编号",
+    "defaults": [
+      {
+        "keyCode": 29,
+        "modifiers": 1
+      }
+    ]
+  },
+  {
+    "id": "newGroup",
+    "title": "新建标签组",
+    "defaults": []
+  },
+  {
+    "id": "showGroups",
+    "title": "显示全部标签组",
+    "defaults": []
+  },
+  {
+    "id": "arrangeTabs",
+    "title": "选项卡排列",
+    "defaults": []
+  },
+  {
+    "id": "arrangeHorizontal",
+    "title": "水平排列",
+    "defaults": []
+  },
+  {
+    "id": "arrangeVertical",
+    "title": "垂直排列",
+    "defaults": []
+  },
+  {
+    "id": "arrangeTiled",
+    "title": "瓷砖排列",
+    "defaults": []
+  },
+  {
+    "id": "links",
+    "title": "显示 / 隐藏链接栏",
+    "defaults": []
+  },
+  {
+    "id": "quickSend",
+    "title": "显示 / 隐藏快速发送栏",
+    "defaults": []
+  },
+  {
+    "id": "focusQuickSend",
+    "title": "定位快速发送栏",
+    "defaults": [
+      {
+        "keyCode": 40,
+        "modifiers": 9
+      }
+    ]
+  },
+  {
+    "id": "composer",
+    "title": "显示 / 隐藏撰写窗",
+    "defaults": [
+      {
+        "keyCode": 34,
+        "modifiers": 9
+      }
+    ]
+  },
+  {
+    "id": "syncInput",
+    "title": "配置同步输入",
+    "defaults": []
+  },
+  {
+    "id": "stopSync",
+    "title": "停止同步输入",
+    "defaults": []
+  },
+  {
+    "id": "files",
+    "title": "文件管理",
+    "defaults": []
+  },
+  {
+    "id": "quickCommands",
+    "title": "快速命令管理器",
+    "defaults": []
+  },
+  {
+    "id": "highlights",
+    "title": "突出显示集",
+    "defaults": []
+  },
+  {
+    "id": "appearance",
+    "title": "主题与配色",
+    "defaults": []
+  },
+  {
+    "id": "hide",
+    "title": "隐藏 OShell",
+    "defaults": [
+      {
+        "keyCode": 4,
+        "modifiers": 1
+      }
+    ]
+  },
+  {
+    "id": "quit",
+    "title": "退出 OShell",
+    "defaults": [
+      {
+        "keyCode": 12,
+        "modifiers": 1
+      }
+    ]
+  },
+  {
+    "id": "minimize",
+    "title": "最小化窗口",
+    "defaults": [
+      {
+        "keyCode": 46,
+        "modifiers": 1
+      }
+    ]
+  },
+  {
+    "id": "zoomPane",
+    "title": "放大 / 恢复当前分屏",
+    "defaults": [
+      {
+        "keyCode": 36,
+        "modifiers": 9
+      }
+    ]
+  },
+  {
+    "id": "nextPane",
+    "title": "下一个分屏",
+    "defaults": [
+      {
+        "keyCode": 30,
+        "modifiers": 3
+      }
+    ]
+  },
+  {
+    "id": "previousPane",
+    "title": "上一个分屏",
+    "defaults": [
+      {
+        "keyCode": 33,
+        "modifiers": 3
+      }
+    ]
+  },
+  {
+    "id": "quickSwitch",
+    "title": "快速切换 / 连接会话",
+    "defaults": [
+      {
+        "keyCode": 31,
+        "modifiers": 3
+      }
+    ]
+  },
+  {
+    "id": "focusFullscreen",
+    "title": "专注全屏 / 退出",
+    "defaults": [
+      {
+        "keyCode": 3,
+        "modifiers": 5
+      }
+    ]
+  }
+]

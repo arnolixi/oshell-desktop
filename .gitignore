@@ -1,0 +1,15 @@
+/dist/
+/validation/
+/mygo.ts
+*.log
+.DS_Store
+__pycache__/
+
+# Local runtime data and credentials
+/config.json
+/credentials.json
+/credential-key
+/known_hosts
+/state-transaction.json
+.env
+.env.local

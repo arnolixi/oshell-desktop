@@ -1,0 +1,283 @@
+// SPDX-License-Identifier: GPL-3.0-only
+package desktop
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"reflect"
+	"strings"
+	"time"
+
+	"github.com/egoist/mygo"
+	"oshell-desktop/internal/core"
+)
+
+func (a *App) selectedManagerRows() []sessionRow {
+	rows := a.managerRows()
+	var chosen []sessionRow
+	for _, r := range rows {
+		if a.managerSelection.Has(r.id) {
+			chosen = append(chosen, r)
+		}
+	}
+	if len(chosen) == 0 && a.managerRow >= 0 && a.managerRow < len(rows) {
+		chosen = append(chosen, rows[a.managerRow])
+	}
+	return chosen
+}
+func (a *App) selectedProfileIDs() map[string]bool {
+	ids := map[string]bool{}
+	for _, r := range a.selectedManagerRows() {
+		if !r.folder && r.linkID == "" {
+			ids[r.profile.ID] = true
+		}
+	}
+	return ids
+}
+func (a *App) connectManagerSelection() {
+	rows := a.selectedManagerRows()
+	a.authQueue = nil
+	a.batchTerminalOpened = false
+	a.batchTerminalOwner = a
+	seen := map[string]bool{}
+	for _, r := range rows {
+		if !r.folder && !seen[r.profile.ID] {
+			seen[r.profile.ID] = true
+			a.authQueue = append(a.authQueue, r.profile)
+		}
+	}
+	if len(a.authQueue) > 0 {
+		a.nextAuthentication()
+	} else if len(rows) == 1 {
+		a.enterRow(rows[0])
+	}
+}
+func (a *App) duplicateManagerSelection() {
+	if a.passwordLocked() || a.configurationBusy() || a.vault == nil {
+		return
+	}
+	ids := a.selectedProfileIDs()
+	if len(ids) == 0 {
+		return
+	}
+	revision, err := a.store.Revision()
+	if err != nil {
+		a.status = "复制失败：" + err.Error()
+		return
+	}
+	vault := a.vault
+	vaultRevision := vault.Revision()
+	originals := append([]core.Profile(nil), a.config.Profiles...)
+	candidate := a.config.Clone()
+	a.setConfigurationBusy(true)
+	go func() {
+		var updates []core.CredentialUpdate
+		defer func() {
+			for i := range updates {
+				updates[i].Password = ""
+			}
+		}()
+		copied := map[string]bool{}
+		var err error
+		copyCredential := func(source, target core.Profile) error {
+			update, exists, err := vault.PrepareCredentialCopy(source, target)
+			if exists {
+				updates = append(updates, update)
+			}
+			return err
+		}
+		for _, source := range originals {
+			if !ids[source.ID] {
+				continue
+			}
+			duplicate := core.DuplicateProfile(source, candidate.Profiles)
+			if err = copyCredential(source, duplicate); err != nil {
+				break
+			}
+			if source.ProxyID == "" && source.Proxy.Kind != "" && source.Proxy.Kind != "none" {
+				if err = copyCredential(core.ProxyCredentialProfile(source.Proxy), core.ProxyCredentialProfile(duplicate.Proxy)); err != nil {
+					break
+				}
+			}
+			candidate.Profiles = append(candidate.Profiles, duplicate)
+			copied[duplicate.ID] = true
+		}
+		if err == nil {
+			err = a.store.CommitCredentialEdit(context.Background(), candidate, vault, updates, revision, vaultRevision)
+		}
+		retry := localConflictRetry(err, candidate, updates)
+		a.post(func() {
+			if !errors.Is(err, core.ErrPendingTransaction) {
+				a.setConfigurationBusy(false)
+			}
+			if err != nil {
+				a.status = "复制失败：" + err.Error()
+				if retry != nil {
+					retry(a)
+				}
+				return
+			}
+			a.applyCommittedConfig(candidate)
+			a.markSharedSyncChanged()
+			if a.hub != nil {
+				a.hub.scheduleSharedSync(2 * time.Second)
+			}
+			a.query = ""
+			if len(copied) == 1 {
+				for _, profile := range candidate.Profiles {
+					if copied[profile.ID] {
+						a.managerGroup = profile.Group
+						a.managerAll = false
+						break
+					}
+				}
+			} else {
+				a.managerAll = true
+			}
+			a.managerSelection.Clear()
+			a.managerRow = -1
+			for i, row := range a.managerRows() {
+				if copied[row.profile.ID] && row.linkID == "" {
+					a.managerSelection.Add(row.id)
+					if a.managerRow < 0 {
+						a.managerRow = i
+						a.selected = row.profile.ID
+					}
+				}
+			}
+			a.status = fmt.Sprintf("已复制 %d 个会话", len(copied))
+			if a.manager != nil {
+				a.manager.Invalidate()
+			}
+		})
+	}()
+}
+func (a *App) deleteManagerSelection() {
+	if a.passwordLocked() || a.configurationBusy() || a.vault == nil {
+		return
+	}
+	rows := a.selectedManagerRows()
+	if !a.managerSelectionMutable() {
+		a.status = "错误：上级目录行或 Links 根目录不能删除"
+		return
+	}
+	if len(rows) == 0 {
+		return
+	}
+	a.confirmSessionDeletion(rows)
+}
+func (a *App) confirmSessionDeletion(rows []sessionRow) {
+	if len(rows) == 0 || a.passwordLocked() || a.configurationBusy() || a.vault == nil {
+		return
+	}
+	snapshot := a.config.Clone()
+	var profiles, dirs, links, names []string
+	for _, row := range rows {
+		names = append(names, row.name)
+		if row.folder {
+			dirs = append(dirs, row.group)
+		} else if row.linkID != "" {
+			links = append(links, row.linkID)
+		} else {
+			profiles = append(profiles, row.profile.ID)
+		}
+	}
+	candidate, summary, err := snapshot.PlanSessionDeletion(profiles, dirs, links)
+	if err != nil {
+		a.status = "删除失败：" + err.Error()
+		return
+	}
+	revision, err := a.store.Revision()
+	if err != nil {
+		a.status = "删除失败：" + err.Error()
+		return
+	}
+	vaultRevision := a.vault.Revision()
+	apply := func() { a.commitManagerDeletion(snapshot, candidate, summary, revision, vaultRevision) }
+	if len(rows) == 1 && rows[0].folder && summary.Profiles == 0 && summary.Links == 0 && summary.Directories == 1 {
+		apply()
+		return
+	}
+	parent := a.manager
+	if parent == nil {
+		parent = a.win
+	}
+	go func() {
+		result, err := mygo.Dialog.Message(mygo.MessageOptions{Parent: parent, Type: mygo.MessageWarning, Title: "删除所选项目", Message: fmt.Sprintf("删除 %d 个会话、%d 个目录和 %d 个快捷引用？", summary.Profiles, summary.Directories, summary.Links), Detail: strings.Join(names, "\n") + "\n\n只删除本地配置；活动连接和服务器文件不受影响。", Buttons: []string{"取消", "删除"}, DefaultButton: 0, CancelButton: 0})
+		if err == nil && result.Button == 1 {
+			a.post(apply)
+		}
+	}()
+}
+func (a *App) commitManagerDeletion(snapshot, candidate core.Config, summary core.SessionDeletion, revision, vaultRevision string) {
+	if a.configurationBusy() || a.passwordLocked() || !reflect.DeepEqual(snapshot, a.config) {
+		a.status = "删除失败：配置已变化，请重新确认"
+		return
+	}
+	vault := a.vault
+	if vault == nil {
+		return
+	}
+	removed := map[string]bool{}
+	for _, id := range summary.RemovedIDs {
+		removed[id] = true
+	}
+	var changes []core.CredentialUpdate
+	for _, profile := range snapshot.Profiles {
+		if removed[profile.ID] {
+			changes = append(changes, core.CredentialUpdate{Profile: profile, Delete: true})
+			if profile.ProxyID == "" && profile.Proxy.Kind != "" && profile.Proxy.Kind != "none" {
+				changes = append(changes, core.CredentialUpdate{Profile: core.ProxyCredentialProfile(profile.Proxy), Delete: true})
+			}
+		}
+	}
+	a.setConfigurationBusy(true)
+	go func() {
+		err := a.store.CommitCredentialEdit(context.Background(), candidate, vault, changes, revision, vaultRevision)
+		retry := localConflictRetry(err, candidate, changes)
+		a.post(func() {
+			if !errors.Is(err, core.ErrPendingTransaction) {
+				a.setConfigurationBusy(false)
+			}
+			if err != nil {
+				a.status = "删除失败：" + err.Error()
+				if retry != nil {
+					retry(a)
+				}
+				return
+			}
+			a.applyCommittedConfig(candidate)
+			a.markSharedSyncChanged()
+			if a.hub != nil {
+				a.hub.scheduleSharedSync(2 * time.Second)
+			}
+			a.managerRow = -1
+			a.managerSelection.Clear()
+			a.selected = ""
+			a.status = fmt.Sprintf("已删除 %d 个会话、%d 个目录和 %d 个引用", summary.Profiles, summary.Directories, summary.Links)
+			if a.manager != nil {
+				a.manager.Invalidate()
+			}
+		})
+	}()
+}
+
+func (a *App) managerConnectCount() int {
+	ids := map[string]bool{}
+	for _, row := range a.selectedManagerRows() {
+		if !row.folder {
+			ids[row.profile.ID] = true
+		}
+	}
+	return len(ids)
+}
+
+func (a *App) managerSelectionMutable() bool {
+	for _, row := range a.selectedManagerRows() {
+		if row.parent || row.folder && row.group == "Links" {
+			return false
+		}
+	}
+	return true
+}

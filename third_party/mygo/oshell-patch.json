@@ -1,0 +1,15 @@
+{
+  "upstream": "github.com/egoist/mygo",
+  "version": "v0.3.5-0.20261008155018-bad73d119dc8",
+  "changed": [
+    "ui/window.go",
+    "README.md"
+  ],
+  "added": [
+    "ui/renderer_preference.go",
+    "ui/renderer_preference_test.go",
+    "oshell-patch.json"
+  ],
+  "purpose": "runtime native window GPU/software choice without runtime recreation",
+  "license": "MIT; upstream LICENSE retained"
+}

@@ -1,0 +1,66 @@
+name: Build and test
+on: [push, pull_request, workflow_dispatch]
+permissions:
+  contents: read
+jobs:
+  test:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Test shared core
+        run: go test -race ./internal/core
+      - name: Compile native UI
+        env:
+          CGO_ENABLED: '0'
+        run: go build ./...
+      - name: Vet
+        run: go vet ./...
+      - name: Native UI tests (macOS)
+        if: runner.os == 'macOS'
+        shell: bash
+        run: |
+          if [ "$(go env GOARCH)" = "arm64" ]; then
+            export MYGO_GHOSTTY_VT="$GITHUB_WORKSPACE/resources/darwin-arm64/oshell-ghostty-vt.dylib"
+          fi
+          go test ./internal/desktop
+  package:
+    needs: test
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: macos-latest
+            target: darwin/arm64
+            artifact: macos-arm64
+          - runner: windows-latest
+            target: windows/amd64
+            artifact: windows-amd64
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Package native application
+        env:
+          CGO_ENABLED: '0'
+        run: python scripts/build.py --target ${{ matrix.target }} --archive
+      - uses: actions/upload-artifact@v4
+        with:
+          name: oshell-${{ matrix.artifact }}
+          path: dist/*.zip
+          if-no-files-found: error
+          retention-days: 7

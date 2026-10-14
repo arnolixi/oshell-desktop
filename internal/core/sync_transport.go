@@ -1,0 +1,303 @@
+// SPDX-License-Identifier: GPL-3.0-only
+package core
+
+import (
+	"bytes"
+	"context"
+	"crypto/sha256"
+	"encoding/hex"
+	"fmt"
+	"io"
+	"net/http"
+	"net/url"
+	"os"
+	"path/filepath"
+	"strings"
+	"time"
+)
+
+type SharedObject struct {
+	Data []byte
+	ETag string
+}
+type SyncTransport interface {
+	Fetch(context.Context) (*SharedObject, error)
+	Put(context.Context, []byte, string) error
+}
+type SyncFailure struct {
+	Kind   string
+	Status int
+}
+
+func (e *SyncFailure) Error() string {
+	switch e.Kind {
+	case "remote-deleted":
+		return "共享同步文件被删除，已停止自动重建"
+	case "encryption":
+		return "主密码或加密数据校验失败"
+	case "conflict":
+		return "共享版本已变化，未覆盖；请重新同步"
+	case "authentication":
+		return "WebDAV 身份验证失败"
+	case "etag":
+		return "服务器未提供强 ETag，无法安全同步"
+	case "redirect":
+		return "同步地址发生重定向，请填写最终 HTTPS 地址"
+	case "size":
+		return "同步数据超过大小限制"
+	case "network":
+		return "同步网络请求失败或超时，本地数据保留"
+	case "unencrypted":
+		return "共享文件未加密或格式无效，未覆盖"
+	case "directory":
+		return "同步目录不可用或包含本机密钥，本地数据保留"
+	case "file-conflict":
+		return "同步目录存在未解决的文件级冲突，请先保留并处理冲突副本"
+	}
+	return fmt.Sprintf("同步服务返回状态 %d", e.Status)
+}
+func safeSyncFailure(kind string) error { return &SyncFailure{Kind: kind} }
+func ValidETag(tag string) bool {
+	b := []byte(tag)
+	if len(b) < 2 || len(b) > 1024 || b[0] != '"' || b[len(b)-1] != '"' {
+		return false
+	}
+	for _, v := range b[1 : len(b)-1] {
+		if v != 33 && (v < 35 || v == 127) {
+			return false
+		}
+	}
+	return true
+}
+
+type WebDAVTransport struct {
+	directory          *url.URL
+	username, password string
+	client             *http.Client
+}
+
+func NewWebDAVTransport(address, username, password string, allowLoopbackHTTP bool) (*WebDAVTransport, error) {
+	u, e := url.Parse(strings.TrimSpace(address))
+	if e != nil || u.Hostname() == "" || u.User != nil || u.RawQuery != "" || u.Fragment != "" || strings.ContainsAny(username, ":\r\n") || strings.ContainsAny(password, "\r\n") {
+		return nil, fmt.Errorf("请输入有效 HTTPS 目录地址，账号密码填写在单独字段")
+	}
+	loopback := u.Hostname() == "localhost" || u.Hostname() == "127.0.0.1" || u.Hostname() == "::1"
+	if u.Scheme != "https" && !(allowLoopbackHTTP && loopback && u.Scheme == "http") {
+		return nil, fmt.Errorf("同步要求 HTTPS")
+	}
+	if !strings.HasSuffix(u.Path, "/") {
+		u.Path += "/"
+	}
+	if u.RawPath != "" && !strings.HasSuffix(u.RawPath, "/") {
+		u.RawPath += "/"
+	}
+	client := &http.Client{Timeout: 45 * time.Second, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
+	return &WebDAVTransport{u, username, password, client}, nil
+}
+func (w *WebDAVTransport) request(ctx context.Context, method string, body []byte, headers map[string]string, directory bool) (int, http.Header, []byte, error) {
+	target := *w.directory
+	if !directory {
+		target.Path += "oshell-vault.json"
+		if target.RawPath != "" {
+			target.RawPath += "oshell-vault.json"
+		}
+	}
+	req, e := http.NewRequestWithContext(ctx, method, target.String(), bytes.NewReader(body))
+	if e != nil {
+		return 0, nil, nil, safeSyncFailure("network")
+	}
+	req.SetBasicAuth(w.username, w.password)
+	req.Header.Set("User-Agent", "OShell Desktop")
+	req.Header.Set("Cache-Control", "no-cache")
+	for k, v := range headers {
+		req.Header.Set(k, v)
+	}
+	response, e := w.client.Do(req)
+	if e != nil {
+		if ctx.Err() != nil {
+			return 0, nil, nil, ctx.Err()
+		}
+		return 0, nil, nil, safeSyncFailure("network")
+	}
+	defer response.Body.Close()
+	if response.StatusCode == 401 || response.StatusCode == 403 {
+		return 0, nil, nil, safeSyncFailure("authentication")
+	}
+	if response.StatusCode >= 300 && response.StatusCode < 400 {
+		return 0, nil, nil, safeSyncFailure("redirect")
+	}
+	if response.ContentLength > MaxSharedVault {
+		return 0, nil, nil, safeSyncFailure("size")
+	}
+	data, e := io.ReadAll(io.LimitReader(response.Body, MaxSharedVault+1))
+	if e != nil {
+		return 0, nil, nil, safeSyncFailure("network")
+	}
+	if len(data) > MaxSharedVault {
+		return 0, nil, nil, safeSyncFailure("size")
+	}
+	return response.StatusCode, response.Header, data, nil
+}
+func (w *WebDAVTransport) Probe(ctx context.Context) error {
+	status, _, _, e := w.request(ctx, "PROPFIND", []byte(`<?xml version="1.0"?><d:propfind xmlns:d="DAV:"><d:prop><d:resourcetype/></d:prop></d:propfind>`), map[string]string{"Depth": "0", "Content-Type": "application/xml; charset=utf-8"}, true)
+	if e != nil {
+		return e
+	}
+	if status != 207 {
+		return &SyncFailure{Kind: "status", Status: status}
+	}
+	_, e = w.Fetch(ctx)
+	return e
+}
+func (w *WebDAVTransport) Fetch(ctx context.Context) (*SharedObject, error) {
+	status, headers, data, e := w.request(ctx, "GET", nil, nil, false)
+	if e != nil {
+		return nil, e
+	}
+	if status == 404 {
+		return nil, nil
+	}
+	if status != 200 {
+		return nil, &SyncFailure{Kind: "status", Status: status}
+	}
+	tag := headers.Get("ETag")
+	if !ValidETag(tag) {
+		return nil, safeSyncFailure("etag")
+	}
+	if !IsSharedVault(data) {
+		return nil, safeSyncFailure("unencrypted")
+	}
+	return &SharedObject{data, tag}, nil
+}
+func (w *WebDAVTransport) Put(ctx context.Context, data []byte, etag string) error {
+	if len(data) > MaxSharedVault {
+		return safeSyncFailure("size")
+	}
+	if !IsSharedVault(data) {
+		return safeSyncFailure("unencrypted")
+	}
+	headers := map[string]string{"Content-Type": "application/json"}
+	if etag == "" {
+		headers["If-None-Match"] = "*"
+	} else {
+		if !ValidETag(etag) {
+			return safeSyncFailure("etag")
+		}
+		headers["If-Match"] = etag
+	}
+	status, _, _, e := w.request(ctx, "PUT", data, headers, false)
+	if e != nil {
+		return e
+	}
+	if status == 412 {
+		return safeSyncFailure("conflict")
+	}
+	if status != 200 && status != 201 && status != 204 {
+		return &SyncFailure{Kind: "status", Status: status}
+	}
+	return nil
+}
+
+type DirectoryTransport struct{ Directory string }
+
+func (d DirectoryTransport) check() error {
+	info, e := os.Stat(d.Directory)
+	if e != nil || !info.IsDir() {
+		return safeSyncFailure("directory")
+	}
+	for _, name := range []string{"local-credential-key.json", "credential-key"} {
+		if _, e = os.Lstat(filepath.Join(d.Directory, name)); e == nil {
+			return safeSyncFailure("directory")
+		}
+	}
+	return platformSyncConflictCheck(filepath.Join(d.Directory, "configuration.json"))
+}
+func (d DirectoryTransport) read() (*SharedObject, error) {
+	file := filepath.Join(d.Directory, "configuration.json")
+	input, e := openImportFile(file)
+	if os.IsNotExist(e) {
+		return nil, nil
+	}
+	if e != nil {
+		return nil, safeSyncFailure("directory")
+	}
+	defer input.Close()
+	info, e := input.Stat()
+	if e != nil || !info.Mode().IsRegular() {
+		return nil, safeSyncFailure("directory")
+	}
+	if info.Size() > MaxSharedVault {
+		return nil, safeSyncFailure("size")
+	}
+	data, e := io.ReadAll(io.LimitReader(input, MaxSharedVault+1))
+	if e != nil {
+		return nil, safeSyncFailure("directory")
+	}
+	if len(data) > MaxSharedVault {
+		return nil, safeSyncFailure("size")
+	}
+	if !IsSharedVault(data) {
+		return nil, safeSyncFailure("unencrypted")
+	}
+	digest := sha256.Sum256(data)
+	return &SharedObject{data, "\"" + hex.EncodeToString(digest[:]) + "\""}, nil
+}
+func (d DirectoryTransport) Fetch(ctx context.Context) (*SharedObject, error) {
+	if e := ctx.Err(); e != nil {
+		return nil, e
+	}
+	if e := d.check(); e != nil {
+		return nil, e
+	}
+	return d.read()
+}
+func (d DirectoryTransport) Put(ctx context.Context, data []byte, etag string) error {
+	if !IsSharedVault(data) {
+		return safeSyncFailure("unencrypted")
+	}
+	if len(data) > MaxSharedVault {
+		return safeSyncFailure("size")
+	}
+	if e := d.check(); e != nil {
+		return e
+	}
+	unlock, e := lockSyncDirectory(ctx, d.Directory)
+	if e != nil {
+		return e
+	}
+	defer unlock()
+	if e = d.check(); e != nil {
+		return e
+	}
+	current, e := d.read()
+	if e != nil {
+		return e
+	}
+	actual := ""
+	if current != nil {
+		actual = current.ETag
+	}
+	if actual != etag {
+		return safeSyncFailure("conflict")
+	}
+	if e = ctx.Err(); e != nil {
+		return e
+	}
+	return coordinateSyncWrite(filepath.Join(d.Directory, "configuration.json"), func() error {
+		latest, e := d.read()
+		if e != nil {
+			return e
+		}
+		tag := ""
+		if latest != nil {
+			tag = latest.ETag
+		}
+		if tag != etag {
+			return safeSyncFailure("conflict")
+		}
+		if e = ctx.Err(); e != nil {
+			return e
+		}
+		return AtomicWrite(filepath.Join(d.Directory, "configuration.json"), data)
+	})
+}

@@ -1,0 +1,79 @@
+package core
+
+import (
+	"context"
+	"errors"
+	"net/http"
+	"net/http/httptest"
+	"testing"
+)
+
+func TestWebDAVProbeReadOnlyAndFailures(t *testing.T) {
+	for _, scenario := range []string{"empty", "authentication", "redirect", "weak-etag"} {
+		t.Run(scenario, func(t *testing.T) {
+			requests := 0
+			server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				requests++
+				user, pass, ok := r.BasicAuth()
+				if !ok || user != "fixture-user" || pass != "fixture-secret" {
+					t.Error("credentials missing")
+				}
+				if r.Method != "PROPFIND" && r.Method != "GET" {
+					t.Error("probe wrote to server")
+				}
+				if scenario == "authentication" {
+					w.WriteHeader(401)
+					return
+				}
+				if scenario == "redirect" {
+					w.Header().Set("Location", "/other/")
+					w.WriteHeader(302)
+					return
+				}
+				if r.Method == "PROPFIND" {
+					if r.URL.Path != "/dav/" || r.Header.Get("Depth") != "0" {
+						t.Error("wrong directory probe")
+					}
+					w.WriteHeader(207)
+					return
+				}
+				if r.URL.Path != "/dav/oshell-vault.json" {
+					t.Error("wrong file")
+				}
+				if scenario == "weak-etag" {
+					w.Header().Set("ETag", `W/"weak"`)
+					w.WriteHeader(200)
+					return
+				}
+				w.WriteHeader(404)
+			}))
+			defer server.Close()
+			transport, err := NewWebDAVTransport(server.URL+"/dav", "fixture-user", "fixture-secret", false)
+			if err != nil {
+				t.Fatal(err)
+			}
+			transport.client.Transport = server.Client().Transport
+			err = transport.Probe(context.Background())
+			if scenario == "empty" {
+				if err != nil || requests != 2 {
+					t.Fatal(err, requests)
+				}
+				return
+			}
+			var failure *SyncFailure
+			if !errors.As(err, &failure) {
+				t.Fatal(err)
+			}
+			want := scenario
+			if want == "weak-etag" {
+				want = "etag"
+			}
+			if failure.Kind != want {
+				t.Fatal(failure.Kind)
+			}
+			if scenario == "redirect" && requests != 1 {
+				t.Fatal("followed redirect")
+			}
+		})
+	}
+}
