@@ -13,6 +13,7 @@ type sessionPasswordEditor struct {
 	password        string
 	protection      string
 	remember, busy  bool
+	revealed        bool
 	cancelRequested bool
 	cancel          context.CancelFunc
 }
@@ -31,7 +32,7 @@ func (a *App) initSessionPassword() {
 func (a *App) sessionPasswordFields(c *ui.Context) {
 	f := &a.features.sessionPassword
 	ui.Field(c, "密码", func() {
-		passwordInput(c, &f.password).Label("会话密码").Placeholder("已保存时留空保留；输入新值替换")
+		revealPasswordInput(c, &f.password, &f.revealed).Label("会话密码").Placeholder("已保存（不回显）；留空沿用，输入新值替换")
 	})
 	ui.Checkbox(c, &f.remember, "保存密码").Disabled(a.vault == nil)
 	if f.remember {
@@ -50,17 +51,6 @@ func (a *App) saveSessionCredential(p core.Profile, connect bool) bool {
 	}
 	if !f.remember && !a.vault.HasStoredCredential(p.ID) {
 		return false
-	}
-
-	if f.remember && f.password == "" {
-		_, err := a.vault.PrepareCredentialEdit(f.original, p, "", true, p.Identity())
-		if err != nil && (f.original == nil || f.original.Kind == p.Kind) {
-			a.formError = err.Error()
-			return true
-		}
-		if err == nil && f.original != nil && f.original.Kind == p.Kind && f.protection == a.vault.CredentialProtection(p.ID) {
-			return false
-		}
 	}
 
 	candidate := a.config.Clone()
@@ -166,6 +156,7 @@ func (a *App) saveSessionCredential(p core.Profile, connect bool) bool {
 }
 func (a *App) finishSavedDraft(p core.Profile, connect bool) {
 	a.features.sessionPassword.password = ""
+	a.features.sessionPassword.revealed = false
 	a.selected = p.ID
 	a.editing = false
 	a.status = "已保存 " + p.Name
@@ -184,6 +175,7 @@ func (a *App) finishSavedDraft(p core.Profile, connect bool) {
 
 func (a *App) cancelSessionPassword() {
 	a.features.sessionPassword.password = ""
+	a.features.sessionPassword.revealed = false
 	if a.features.sessionPassword.busy {
 		a.features.sessionPassword.cancelRequested = true
 	}

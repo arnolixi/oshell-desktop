@@ -51,6 +51,7 @@ func TestSessionEditorSavesPreservesAndRemovesPasswordAtomically(t *testing.T) {
 	a.edit(saved)
 	a.draft.Name = "Renamed"
 	a.saveDraft(false)
+	waitOperator(t, a, func() bool { return !a.features.sessionPassword.busy })
 	if a.editing {
 		t.Fatal(a.formError)
 	}
@@ -62,9 +63,16 @@ func TestSessionEditorSavesPreservesAndRemovesPasswordAtomically(t *testing.T) {
 	a.edit(saved)
 	a.draft.Host = "different.invalid"
 	a.saveDraft(false)
-	if !a.editing || a.formError == "" {
-		t.Fatal("changed target silently reused credential")
+	waitOperator(t, a, func() bool { return !a.features.sessionPassword.busy })
+	if a.editing {
+		t.Fatal(a.formError)
 	}
+	saved, _ = a.profileByID(p.ID)
+	secret, err = a.vault.GetFor(saved, saved.Identity())
+	if err != nil || secret != "editor-secret-fixture" {
+		t.Fatal("changed target lost saved password", err)
+	}
+	a.edit(saved)
 	a.features.sessionPassword.remember = false
 	a.saveDraft(false)
 	waitOperator(t, a, func() bool { return !a.features.sessionPassword.busy })

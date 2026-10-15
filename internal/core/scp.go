@@ -81,6 +81,7 @@ func (c *Connection) scp(ctx context.Context, command string, transfer func(*buf
 	return e
 }
 func (c *Connection) SCPUpload(ctx context.Context, local, remote string, report func(TransferProgress)) error {
+	ctx = snapshotTransferLimit(ctx)
 	name := path.Base(remote)
 	if !safeEntry(name) || strings.ContainsAny(remote, "\x00\r\n") {
 		return fmt.Errorf("SCP 目标路径无效")
@@ -156,6 +157,7 @@ func (c *Connection) SCPUpload(ctx context.Context, local, remote string, report
 	})
 }
 func (c *Connection) SCPDownload(ctx context.Context, remote, local string, replace bool, report func(TransferProgress)) error {
+	ctx = snapshotTransferLimit(ctx)
 	if strings.ContainsAny(remote, "\x00\r\n") || !safeEntry(path.Base(remote)) {
 		return fmt.Errorf("SCP 远程路径无效")
 	}

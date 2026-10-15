@@ -27,3 +27,9 @@ Bundled library builds and SHA-256 hashes are pinned by internal/terminal/mygo-p
 - golang.org/x/text v0.42.0 and golang.org/x/term v0.46.0 (BSD): corresponding resources/licenses files.
 - Unicode 17.0.0 East Asian Width ranges (Unicode-3.0): resources/licenses/Unicode-LICENSE.
 - Ghostty has a local OShell ambiguous-width extension; exact patch, upstream commit and build procedure are in native/ghostty/. Original Ghostty licensing remains applicable.
+
+## FTP listing metadata patch
+
+`third_party/ftp` contains github.com/jlaffaye/ftp v0.2.4 (MIT; see its LICENSE). Local changes retain UNIX LIST and MLSD permissions and ownership fields for file display.
+
+`third_party/sftp` contains github.com/pkg/sftp v1.13.11 (BSD-2-Clause; see LICENSE), patched to retain verified UNIX long-listing owner/group display hints. Numeric SFTP attributes remain authoritative.

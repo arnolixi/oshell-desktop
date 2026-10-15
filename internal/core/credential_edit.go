@@ -17,7 +17,8 @@ func sameCredentialDestination(a, b Profile) bool {
 }
 
 // PrepareCredentialEdit never alters the vault. A blank password preserves an
-// existing envelope only for the same destination; caller commits the config
+// existing envelope for the same destination, or rebinds it after an explicit
+// destination edit; caller commits the config
 // and returned changes together, guarded by both revisions.
 func (v *Vault) PrepareCredentialEdit(original *Profile, destination Profile, password string, remember bool, identity SSHIdentity, protection ...string) ([]CredentialUpdate, error) {
 	v.mu.Lock()
@@ -43,14 +44,12 @@ func (v *Vault) PrepareCredentialEdit(original *Profile, destination Profile, pa
 	if original == nil || original.ID != destination.ID || !exists || entry.Identity != credentialIdentity(*original) {
 		return nil, fmt.Errorf("请输入要保存的密码，或取消保存")
 	}
-	if !sameCredentialDestination(*original, destination) {
-		return nil, fmt.Errorf("连接目标已改变，请重新输入密码或取消保存")
-	}
-	if original.Kind == destination.Kind && entry.Local == local {
+	sameTarget := sameCredentialDestination(*original, destination)
+	if sameTarget && original.Kind == destination.Kind && entry.Local == local {
 		return nil, nil
 	}
 	// SSH -> SFTP is one destination, but this vault's AAD also contains kind.
-	if entry.Resolved != nil && *entry.Resolved != identity || entry.Resolved == nil && original.Identity() != identity {
+	if sameTarget && (entry.Resolved != nil && *entry.Resolved != identity || entry.Resolved == nil && original.Identity() != identity) {
 		return nil, fmt.Errorf("SSH 配置解析出的目标已改变，请重新输入密码")
 	}
 	if len(v.key) == 0 && !entry.Local {

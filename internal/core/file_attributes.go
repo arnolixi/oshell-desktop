@@ -27,6 +27,29 @@ func RemoteFileAttributes(info os.FileInfo) FileAttributes {
 		result.User = strconv.FormatUint(uint64(source.Uid()), 10)
 		result.Group = strconv.FormatUint(uint64(source.Gid()), 10)
 	}
+	if source, ok := info.(interface{ OwnerNames() (string, string) }); ok {
+		user, group := source.OwnerNames()
+		if user != "" {
+			result.User = user
+		}
+		if group != "" {
+			result.Group = group
+		}
+	}
+	if stat, ok := info.Sys().(*sftp.FileStat); ok && stat != nil {
+		for _, fact := range stat.Extended {
+			switch fact.ExtType {
+			case "owner", "owner@openssh.com", "unix.ownername":
+				if fact.ExtData != "" {
+					result.User = fact.ExtData
+				}
+			case "group", "group@openssh.com", "unix.groupname":
+				if fact.ExtData != "" {
+					result.Group = fact.ExtData
+				}
+			}
+		}
+	}
 	if known {
 		mode := info.Mode()
 		text := []byte("----------")

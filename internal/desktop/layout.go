@@ -11,6 +11,9 @@ import (
 type tabDrag struct{ ID string }
 
 func (a *App) moveTabBefore(source, target string) {
+	a.moveTabRelative(source, target, false)
+}
+func (a *App) moveTabRelative(source, target string, after bool) {
 	a.ensureGroups()
 	if source == target {
 		return
@@ -38,9 +41,13 @@ func (a *App) moveTabBefore(source, target string) {
 	if at < 0 {
 		return
 	}
+	targetGroup := remaining[at].group
+	if after {
+		at++
+	}
 	remaining = append(remaining, nil)
 	copy(remaining[at+1:], remaining[at:])
-	moving.group = remaining[at].group
+	moving.group = targetGroup
 	remaining[at] = moving
 	a.tabs = remaining
 	for i, t := range a.tabs {
@@ -50,6 +57,9 @@ func (a *App) moveTabBefore(source, target string) {
 		}
 	}
 	a.pruneGroups()
+	if active != nil {
+		a.setCurrentTab(active, false)
+	}
 }
 
 func (a *App) ownerTab(p *pane) *tab {

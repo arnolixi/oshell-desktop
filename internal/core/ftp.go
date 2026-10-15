@@ -204,6 +204,26 @@ type ftpInfo struct{ entry *ftp.Entry }
 func (i ftpInfo) Name() string { return i.entry.Name }
 func (i ftpInfo) Size() int64  { return int64(i.entry.Size) }
 func (i ftpInfo) Mode() os.FileMode {
+	if i.entry.UNIXModeKnown {
+		n := i.entry.UNIXMode
+		mode := os.FileMode(n & 0777)
+		if n&04000 != 0 {
+			mode |= os.ModeSetuid
+		}
+		if n&02000 != 0 {
+			mode |= os.ModeSetgid
+		}
+		if n&01000 != 0 {
+			mode |= os.ModeSticky
+		}
+		if i.entry.Type == ftp.EntryTypeFolder {
+			mode |= os.ModeDir
+		}
+		if i.entry.Type == ftp.EntryTypeLink {
+			mode |= os.ModeSymlink
+		}
+		return mode
+	}
 	if i.entry.Type == ftp.EntryTypeFolder {
 		return os.ModeDir | 0755
 	}
@@ -216,9 +236,9 @@ func (i ftpInfo) ModTime() time.Time { return i.entry.Time }
 func (i ftpInfo) IsDir() bool        { return i.entry.Type == ftp.EntryTypeFolder }
 func (i ftpInfo) Sys() any           { return nil }
 
-// The FTP dependency discards LIST/MLSD ownership and permission facts. Mode
-// contains compatibility defaults only and must not be shown as server data.
-func (i ftpInfo) PermissionsKnown() bool { return false }
+// Only parsed server attributes are displayed; synthetic defaults remain hidden.
+func (i ftpInfo) PermissionsKnown() bool       { return i.entry.UNIXModeKnown }
+func (i ftpInfo) OwnerNames() (string, string) { return i.entry.UNIXOwner, i.entry.UNIXGroup }
 
 type ftpReader struct {
 	ctx      context.Context
@@ -232,7 +252,12 @@ func (r *ftpReader) Read(b []byte) (int, error) {
 	if e := r.ctx.Err(); e != nil {
 		return 0, e
 	}
-	n, e := r.source.Read(b)
+	n, e := r.source.Read(b[:min(len(b), 64<<10)])
+	if n > 0 {
+		if err := waitTransfer(r.ctx, n); err != nil {
+			return 0, err
+		}
+	}
 	r.state.Bytes += int64(n)
 	if r.progress != nil && time.Since(r.last) > 200*time.Millisecond {
 		r.last = time.Now()

@@ -28,8 +28,8 @@ func TestCredentialEditPreservesAndRebindsWithoutSecretRetyping(t *testing.T) {
 	}
 	changed := p
 	changed.Host = "different.invalid"
-	if _, err = v.PrepareCredentialEdit(&p, changed, "", true, changed.Identity()); err == nil {
-		t.Fatal("reused credential for changed host")
+	if changes, err = v.PrepareCredentialEdit(&p, changed, "", true, changed.Identity()); err != nil || len(changes) != 1 || changes[0].Password != "fixture-secret" || changes[0].Identity != changed.Identity() {
+		t.Fatal("explicit host edit did not rebind saved credential", err)
 	}
 	file := p
 	file.Kind = "sftp"

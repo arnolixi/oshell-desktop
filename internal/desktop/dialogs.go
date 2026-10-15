@@ -26,7 +26,9 @@ func (a *App) dialogs(c *ui.Context) {
 				ui.Button(c, "取消").OnClick(func() { a.authOpen = false; a.authQueue = nil })
 				return
 			}
-			ui.Field(c, "登录密码（私钥 / Agent 认证可留空）", func() { passwordInput(c, &a.password).AutoFocus().Disabled(a.features.authPreparing) })
+			ui.Field(c, "登录密码（私钥 / Agent 认证可留空）", func() {
+				revealPasswordInput(c, &a.password, &a.authPasswordRevealed).AutoFocus().Disabled(a.features.authPreparing)
+			})
 			if a.pendingProfile.IdentityFile != "" {
 				ui.Field(c, "私钥口令（未加密可留空）", func() { passwordInput(c, &a.keyPassword) })
 			}
@@ -60,6 +62,7 @@ func (a *App) dialogs(c *ui.Context) {
 	})
 	// Modal can also be dismissed by Escape or by clicking its backdrop.
 	if !a.authOpen {
+		a.authPasswordRevealed = false
 		if a.features.authPreparing {
 			a.features.authGeneration++
 			if a.features.authCancel != nil {

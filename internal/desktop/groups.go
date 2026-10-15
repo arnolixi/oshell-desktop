@@ -7,12 +7,16 @@ import (
 	"oshell-desktop/internal/core"
 	"strconv"
 	"strings"
+	"time"
 	"unicode"
 	"unicode/utf8"
 )
 
 // Groups own existing tabs, never connections. A hidden leaf stays alive.
 type tabGroup struct {
+	dragOver         bool
+	scroll           ui.ScrollState
+	scrollTime       time.Time
 	id, name, active string
 	hidden           bool
 }

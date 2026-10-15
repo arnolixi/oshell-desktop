@@ -18,13 +18,20 @@ import (
 )
 
 type fileTransfer struct {
-	refresh bool
-	files   *fileState
-	started time.Time
+	lastProgress time.Time
+	lastBytes    int64
+	refresh      bool
+	files        *fileState
+	started      time.Time
 }
 type fileTransferContextKey struct{}
 
 type fileState struct {
+	rateUnit                     string
+	limiter                      core.TransferLimiter
+	rateChoice                   string
+	rateCustom                   string
+	rateError                    string
 	statusError                  bool
 	pageRows                     int
 	rowHeight                    float32
@@ -234,6 +241,7 @@ func (a *App) fileBrowser(c *ui.Context, p *pane, full bool) {
 			return
 		}
 		f := p.files
+		fileRateControls(c, f)
 		if p.conn != nil && f.protocol == "" {
 			f.protocol = "SFTP"
 		}
@@ -527,9 +535,10 @@ func (a *App) withFileOperation(p *pane, refresh bool, operation func(context.Co
 	f.status = "正在处理文件…"
 	f.started = time.Now()
 	ctx, cancel := context.WithCancel(context.Background())
-	task := &fileTransfer{files: f, started: f.started, refresh: refresh}
+	task := &fileTransfer{files: f, started: f.started, refresh: refresh, lastProgress: f.started}
 	f.activeTransfer = task
 	ctx = context.WithValue(ctx, fileTransferContextKey{}, task)
+	ctx = core.WithTransferLimiter(ctx, &f.limiter)
 	f.cancel = cancel
 	go func() {
 		defer cancel()
@@ -580,7 +589,15 @@ func (a *App) transferProgress(p *pane, ctx context.Context) func(core.TransferP
 			if ctx.Err() != nil || p.files != task.files || p.files.activeTransfer != task {
 				return
 			}
-			task.files.status = fmt.Sprintf("%s · %s · %s/s · %d 个文件", progress.Path, bytesLabel(progress.Bytes), bytesLabel(int64(float64(progress.Bytes)/max(time.Since(task.started).Seconds(), 0.1))), progress.Files)
+			now := time.Now()
+			delta := progress.Bytes - task.lastBytes
+			if delta < 0 {
+				delta = progress.Bytes
+			}
+			elapsed := now.Sub(task.lastProgress).Seconds()
+			task.files.status = fmt.Sprintf("%s · %s · %s/s · %d 个文件", progress.Path, bytesLabel(progress.Bytes), bytesLabel(int64(float64(delta)/max(elapsed, 0.1))), progress.Files)
+			task.lastBytes = progress.Bytes
+			task.lastProgress = now
 		})
 	}
 }

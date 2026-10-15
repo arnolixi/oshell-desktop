@@ -87,6 +87,8 @@ type App struct {
 	managerCache                                    *managerRowsCache
 	managerParentClick                              bool
 	managerRow                                      int
+	managerRename                                   *managerRenameState
+	authPasswordRevealed                            bool
 	managerList                                     ui.ListState
 	history                                         []string
 	query, selected, status, quick                  string
@@ -390,6 +392,7 @@ func (a *App) request(p core.Profile, split int, terminalMode ...bool) {
 	a.pendingProfile = p
 	a.pendingSplit = split
 	a.password = ""
+	a.authPasswordRevealed = false
 	a.keyPassword = ""
 	a.features.proxyPassword = ""
 	a.features.proxyKeyPassword = ""
@@ -443,6 +446,7 @@ func (a *App) request(p core.Profile, split int, terminalMode ...bool) {
 				if saved != "" {
 					a.authOpen = false
 					a.password = ""
+					a.authPasswordRevealed = false
 					a.keyPassword = ""
 					a.features.savedPassword = ""
 					a.features.savedIdentity = nil
@@ -457,6 +461,7 @@ func (a *App) request(p core.Profile, split int, terminalMode ...bool) {
 			if keyCandidate && (a.vault == nil || !a.vault.HasStoredCredential(p.ID)) {
 				a.authOpen = false
 				a.password = ""
+				a.authPasswordRevealed = false
 				a.keyPassword = ""
 				a.features.savedPassword = ""
 				a.features.savedIdentity = nil

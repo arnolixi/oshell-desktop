@@ -1,20 +1,22 @@
 # OShell Desktop
 
-Go 共用核心、mygo 原生 UI 和 Ghostty VT 终端实现，功能参考 macOS OShell 0.2.72。
+Go 共用核心、mygo 原生 UI 和 Ghostty VT 终端实现，功能参考 macOS OShell 0.2.74。
 本机只保留最新 macOS arm64 应用；Windows amd64 兼容包由 GitHub Actions 构建。
 本项目不替换原 Swift OShell，数据目录相互独立。
 
 ## 本机使用与构建
 
-要求 Apple Silicon、macOS 13+、Go 1.27.1 和 Python 3。
+要求 Apple Silicon、macOS 13+、Go 1.27.1 和 Python 3。开发构建显式使用 ad-hoc 签名：
 
 ```sh
-python3 scripts/build.py
+OSHELL_ALLOW_ADHOC=1 python3 scripts/build.py
 open "dist/OShell Desktop.app"
 ```
 
 构建默认只生成 `dist/OShell Desktop.app`，成功后替换上一版，不生成 ZIP 或 DMG。
-脚本校验固定终端库、编译主程序与外部启动助手，最后进行本地签名和签名验证。
+脚本校验固定终端库、编译主程序与外部启动助手，最后进行签名和签名验证。
+正式 macOS 构建使用 `scripts/code-signing.json` 固定的自签名身份；本地通过 `OSHELL_CODESIGN_DIRECTORY` 指向含 `identity.p12` 和 `password` 的私有目录。私钥不得提交。
+Actions 的普通构建使用 ad-hoc；手动选择 `fixed_signing` 时，必须配置 `OSHELL_CODESIGN_P12`（Base64）及 `OSHELL_CODESIGN_PASSWORD` 仓库 Secrets，缺失或证书不匹配会失败。固定自签名不等于 Developer ID 或 Apple 公证。
 这不是 Developer ID 公证发布版。首次构建可能需要下载 Go 依赖和固定原生运行库。
 
 开发运行：
@@ -49,11 +51,12 @@ Windows 包带有 `oshell-portable` 标记，配置、凭据等数据直接存�
 
 ## 功能与边界
 
-- SSH、本地终端、FTP / SFTP、SCP 与 ZMODEM 传输。
-- 会话目录、快捷引用、搜索、批量管理、导入导出和代理 / 跳板机。
-- 分屏、标签组、多窗口、快速命令、输入同步和终端日志。
+- SSH、本地终端、FTP / SFTP、SCP 与 ZMODEM 传输。每个文件标签独立限速，支持预设 / 自定义；SFTP / FTP 即时调整，SCP 下次传输生效。
+- 文件权限、用户与组：FTP 保留 UNIX LIST / MLSD 属性；SFTP 优先显示经属性核对的服务器名称，否则显示 UID/GID。
+- 会话目录、快捷引用、搜索、批量管理、导入导出和代理 / 跳板机。F2 / 右键列表内重命名，回车保存，Esc / 失焦取消；行尾按钮打开属性。
+- 分屏、标签组、多窗口、快速命令、输入同步和终端日志。标签支持前后插入、跨组排序及边缘自动滚动，文件标签采用同样规则。
 - 空闲终端原位复用、连接状态圆点、已连接标签双击复制、标签栏全区域右键菜单。
-- 主密码与本机凭据保护、共享目录 / WebDAV 同步及冲突处理。
+- 主密码与本机凭据保护、共享目录 / WebDAV 同步及冲突处理。会话属性 / 登录密码可切换本次输入显隐，已存密码不回显；修改目标后留空沿用并重新加密，取消保存则删除凭据。
 - 配色与颜色选择器、键盘快捷键、自定义数据目录。
 - 独立时钟设置：字体、8–96 点字号、颜色、0–100% 透明度与九宫格位置；无背景浮层不占终端行列。
 
@@ -72,7 +75,7 @@ go vet ./...
 
 测试使用临时数据目录和本机模拟服务，不需要真实服务器凭据。
 可设置 `OSHELL_TEST_ARTIFACTS=/absolute/path` 输出 UI 回归截图。
-`validation/report-20261009-221430.zip` 是保留的用户 Windows 实测报告，非安装包。
+`validation/report-20261009-221430.zip` 是本机保留的用户 Windows 实测报告，不随源码上传，非安装包。
 
 ## 维护结构
 

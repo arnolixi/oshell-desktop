@@ -20,3 +20,14 @@ func (h *applicationHub) updateMenuLabel() string            { return "检查更
 func (a *App) invokeUpdater()                                { a.features.settingsTab = 4; a.openSettings() }
 
 func (a *App) updatesBlockRepositoryReload() bool { return false }
+
+func (a *App) updateToolbar(c *ui.Context) {
+	text := "更新"
+	if a.win != nil {
+		w, _ := a.win.Size()
+		if w < 1000 {
+			text = ""
+		}
+	}
+	toolButton(c, "更新", arrowUpIcon, text).OnClick(a.invokeUpdater)
+}

@@ -35,6 +35,7 @@ func (a *App) openManager() {
 	})
 }
 func (a *App) closeManager() {
+	a.managerRename = nil
 	if a.manager != nil {
 		w := a.manager
 		a.manager = nil
@@ -148,7 +149,11 @@ func (a *App) enterRow(row sessionRow) {
 }
 func (a *App) managerView(c *ui.Context) {
 	a.drain()
-	if auxiliaryEscape(c, a.closeManager) {
+	if a.managerRename != nil && c.Shortcut(0, ui.KeyEscape) {
+		a.managerRename = nil
+		return
+	}
+	if a.managerRename == nil && auxiliaryEscape(c, a.closeManager) {
 		return
 	}
 	a.theme(c)
@@ -249,7 +254,8 @@ func (a *App) managerView(c *ui.Context) {
 		a.managerList.Selection = &a.managerSelection
 		a.managerList.Key = func(i int) any { return rows[i].id }
 		a.managerList.Label = func(i int) string { return rows[i].name }
-		columns := []ui.TableColumn{{Title: "名称", Width: 210, MinWidth: 160}, {Title: "协议", Width: 64, MinWidth: 56}, {Title: "主机", Width: 190, MinWidth: 140}, {Title: "用户名", Width: 100, MinWidth: 80}, {Title: "端口", Width: 60, MinWidth: 56}, {Title: "目录", Width: 160, MinWidth: 100}}
+
+		columns := []ui.TableColumn{{Title: "名称", Width: 210, MinWidth: 160}, {Title: "协议", Width: 64, MinWidth: 56}, {Title: "主机", Width: 190, MinWidth: 140}, {Title: "用户名", Width: 100, MinWidth: 80}, {Title: "端口", Width: 60, MinWidth: 56}, {Title: "目录", Width: 160, MinWidth: 100}, {Title: "", Width: 36, MinWidth: 36}}
 		table := ui.Table(c, &a.managerList, columns, len(rows), func(row, col int) {
 			r := rows[row]
 			p := r.profile
@@ -258,7 +264,24 @@ func (a *App) managerView(c *ui.Context) {
 				textColor = c.Theme().AccentText
 				iconColor = textColor
 			}
+			if col == 6 {
+				if !r.parent && !(r.folder && r.group == "Links") {
+					ui.Button(c, "✎").Label("编辑 " + r.name).Width(24).OnClick(func() {
+						if r.folder {
+							a.openDirectory("移动 / 重命名目录", r.group)
+						} else if r.linkID != "" {
+							a.editManagerLink(r.linkID)
+						} else {
+							a.editManagerProfile(r.profile)
+						}
+					})
+				}
+				return
+			}
 			if col == 0 {
+				if a.managerNameEditor(c, r) {
+					return
+				}
 				icon := terminalIcon
 				if r.linkID != "" {
 					icon = linkIcon
@@ -268,7 +291,8 @@ func (a *App) managerView(c *ui.Context) {
 				}
 				cell := ui.Row(c).FillWidth().Height(32).Gap(7).Children(func() {
 					ui.Icon(c, icon).FontSize(15).TextColor(iconColor)
-					ui.RichText(c, managerSearchSpans(r.name, query)...).SingleLine().Tooltip(r.name)
+					ui.RichText(c, managerSearchSpans(r.name, query)...).SingleLine().Tooltip(r.name).Grow(1).MinWidth(0)
+
 				})
 				cell.HandleInput(func(ev ui.InputEvent) bool { return a.managerCellInput(r, ev) })
 				cell.ContextMenu(func(m *ui.Menu) { a.managerContextMenu(m, r.id) })
@@ -321,6 +345,9 @@ func (a *App) managerView(c *ui.Context) {
 				ui.RichText(c, managerSearchSpans(s, query)...).SingleLine().Tooltip(s).TextColor(textColor)
 			})
 		}).Grow(1).MinHeight(0).BorderWidth(1).BorderColor(c.Theme().Border).Radius(4).Label("会话列表")
+		if a.managerRename == nil && table.Shortcut(0, ui.KeyF2) && len(chosen) == 1 {
+			a.beginManagerRename(chosen[0])
+		}
 		if focusResults {
 			a.managerList.Focus(c)
 		}
@@ -336,7 +363,7 @@ func (a *App) managerView(c *ui.Context) {
 				a.selected = rows[a.managerRow].profile.ID
 			}
 		}
-		if table.Submitted() && valid {
+		if table.Submitted() && valid && a.managerRename == nil {
 			a.connectManagerSelection()
 		}
 		// Entering a folder clears managerRow in this frame. Re-evaluate before

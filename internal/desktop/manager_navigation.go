@@ -16,6 +16,7 @@ func managerParent(group string) string {
 }
 
 func (a *App) navigateManager(group string) {
+	a.managerRename = nil
 	a.managerGroup = group
 	a.managerAll = false
 	a.query = ""

@@ -146,7 +146,7 @@ func (a *App) updateMain(fn func()) {
 }
 func (a *App) checkForUpdates(automatic bool) {
 	state := a.updateState()
-	if state.busy || state.prepared != nil || a.passwordLocked() {
+	if state.busy || state.confirming || state.prepared != nil || a.passwordLocked() {
 		return
 	}
 	_, info, e := currentUpdateBundle()
@@ -206,6 +206,9 @@ func (a *App) checkForUpdates(automatic bool) {
 				state.status = "当前已是最新版本"
 			} else {
 				state.status = "发现可用更新 " + candidate.Manifest.Version
+				if !automatic {
+					a.confirmAvailableUpdate()
+				}
 				if automatic {
 					a.status = state.status
 				}
@@ -508,4 +511,37 @@ func (a *App) updateDialogsOpen() bool {
 func (a *App) updatesBlockRepositoryReload() bool {
 	state := a.updateState()
 	return state.busy || state.prepared != nil
+}
+
+func (a *App) updateToolbar(c *ui.Context) {
+	state := a.updateState()
+	label := "更新"
+	if state.prepared != nil {
+		label = "安装更新"
+	}
+	text := label
+	if a.win != nil {
+		w, _ := a.win.Size()
+		if w < 1000 {
+			text = ""
+		}
+	}
+	toolButton(c, label, arrowUpIcon, text).Disabled(state.busy || state.confirming).OnClick(a.invokeUpdater)
+}
+func (a *App) confirmAvailableUpdate() {
+	state := a.updateState()
+	candidate := state.candidate
+	if candidate == nil || state.confirming || state.busy {
+		return
+	}
+	state.confirming = true
+	go func() {
+		result, err := showUpdateConfirmation(mygo.MessageOptions{Parent: a.preferencesWindow, Type: mygo.MessageQuestion, Title: "发现新版本", Message: "下载 OShell Desktop " + candidate.Manifest.Version + "？", Detail: candidate.Manifest.Notes, Buttons: []string{"稍后", "下载更新"}, DefaultButton: 0, CancelButton: 0})
+		a.updateMain(func() {
+			state.confirming = false
+			if err == nil && result.Button == 1 && state.candidate == candidate && a.updateSourceStillCurrent() {
+				a.downloadUpdate()
+			}
+		})
+	}()
 }

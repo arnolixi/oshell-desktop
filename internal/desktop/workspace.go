@@ -99,6 +99,7 @@ func (a *App) toolbar(c *ui.Context) {
 		toolButton(c, "新建会话", plusIcon, "新建").OnClick(func() { a.edit(a.newProfile("ssh")) })
 		toolButton(c, "本地终端", terminalIcon, "本地").OnClick(a.local)
 		toolButton(c, "当前会话属性", settingsIcon, "").Disabled(a.activePane() == nil || (a.activePane().profile.Kind != "ssh" && !a.activePane().terminalOnly)).OnClick(func() { a.edit(a.activePane().profile) })
+		a.updateToolbar(c)
 		toolButton(c, "默认会话属性", settingsIcon, "").OnClick(a.showDefaults)
 		ui.MenuButton(c, "工具", func(m *ui.Menu) {
 			if m.Item("专注全屏 / 退出").Checked(a.focusFullscreen.requested).Chosen() {
@@ -491,7 +492,8 @@ func (a *App) groupTabBar(c *ui.Context, g *tabGroup) {
 				ui.Icon(c, chevronIcon).FontSize(12).TextColor(color)
 			})
 		}
-		ui.ScrollHorizontal(c).Width(totalWidth).Shrink(1).MinWidth(0).Height(30).ContextMenu(backgroundMenu).Children(func() {
+		g.dragOver = false
+		scroll := ui.ScrollHorizontal(c).TrackScroll(&g.scroll).Width(totalWidth).Shrink(1).MinWidth(0).Height(30).ContextMenu(backgroundMenu).Children(func() {
 			ui.Row(c).Gap(1).Children(func() {
 				for i, t := range tabs {
 					row := ui.Row(c.Key(t.id)).Height(30).Gap(0).Padding(0, 4).Width(widths[i]).Shrink(0).Radius(5).Background(c.Theme().Background.Mix(c.Theme().Text, 0.02)).BorderColor(ui.Transparent)
@@ -501,11 +503,19 @@ func (a *App) groupTabBar(c *ui.Context, g *tabGroup) {
 						})
 					}
 					if _, over := ui.DragOver[tabDrag](row); over {
-						row.BorderColor(c.Theme().Accent).BorderWidth(0, 0, 2, 2)
+						g.dragOver = true
+						x, _, _ := row.PointerPosition()
+						if x < row.Bounds().W/2 {
+							row.BorderColor(terminalFlame).BorderWidth(0, 0, 0, 2)
+						} else {
+							row.BorderColor(terminalFlame).BorderWidth(0, 2, 0, 0)
+						}
 					}
 					if drag, dropped := ui.Drop[tabDrag](row); dropped {
 						source, target := drag.ID, t.id
-						a.post(func() { a.moveTabBefore(source, target) })
+						x, _, _ := row.PointerPosition()
+						after := x >= row.Bounds().W/2
+						a.post(func() { a.moveTabRelative(source, target, after) })
 					}
 					row.ContextMenu(func(m *ui.Menu) { a.tabStripMenu(m, g, t) })
 					row.Children(func() {
@@ -523,6 +533,7 @@ func (a *App) groupTabBar(c *ui.Context, g *tabGroup) {
 				}
 			})
 		})
+		a.tabDragScroll(c, scroll, g)
 		tabBarButton(c, "新建标签", plusIcon).ContextMenu(backgroundMenu).Menu(func(m *ui.Menu) { a.activateGroup(g); a.newTabMenu(m) })
 		ui.Box(c).Grow(1).MinWidth(0).ContextMenu(backgroundMenu)
 		tabBarButton(c, "所有标签", chevronIcon).ContextMenu(backgroundMenu).Disabled(len(tabs) == 0).Menu(func(m *ui.Menu) {
@@ -539,8 +550,8 @@ func (a *App) groupTabBar(c *ui.Context, g *tabGroup) {
 	})
 }
 func (a *App) welcome(c *ui.Context) {
-	ui.Column(c).Grow(1).FillHeight().Center().Gap(15).Background(c.Theme().Background).Children(func() {
-		ui.Icon(c, terminalIcon).FontSize(44).TextColor(ui.Hex("#66b6c3")).Margin(0, 0, 9, 0)
+	ui.Column(c).Grow(1).FillHeight().Center().Gap(8).Background(c.Theme().Background).Children(func() {
+		ui.Image(c, brandImage()).Size(80, 80)
 		ui.Text(c, "OShell").FontSize(30).Bold()
 		ui.Text(c, "连接你的服务器，专注每一条命令。").FontSize(13).TextColor(c.Theme().TextMuted)
 		ui.Row(c).Gap(10).Margin(3, 0).Children(func() {

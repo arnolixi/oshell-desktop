@@ -55,6 +55,9 @@ func (s *transferState) copy(dst io.Writer, src io.Reader, name string) error {
 		}
 		n, e := src.Read(b)
 		if n > 0 {
+			if err := waitTransfer(s.ctx, n); err != nil {
+				return err
+			}
 			w, we := dst.Write(b[:n])
 			s.bytes += int64(w)
 			if we != nil {

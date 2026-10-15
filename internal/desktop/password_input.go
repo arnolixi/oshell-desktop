@@ -11,6 +11,9 @@ func passwordInput(c *ui.Context, value *string) ui.Element {
 }
 func passwordSelection(input ui.Element, value *string) ui.Element {
 	input.Password()
+	return passwordSelectAll(input, value)
+}
+func passwordSelectAll(input ui.Element, value *string) ui.Element {
 	if runtime.GOOS == "darwin" {
 		pending := ui.Local(input, "password-select-all", func() bool { return false })
 		if *pending {
@@ -27,5 +30,23 @@ func passwordSelection(input ui.Element, value *string) ui.Element {
 			return true
 		})
 	}
+	return input
+}
+
+// Uses the same editor in both modes so its selection and Unicode text survive.
+func revealPasswordInput(c *ui.Context, value *string, revealed *bool) ui.Element {
+	var input ui.Element
+	ui.Row(c).FillWidth().Gap(8).Children(func() {
+		input = passwordSelectAll(ui.TextInput(c, value), value).Grow(1)
+		if !*revealed {
+			input.Password()
+		}
+		last := ui.Local(input, "last-password-visibility", func() bool { return *revealed })
+		if *last != *revealed {
+			input.Focus()
+			*last = *revealed
+		}
+		ui.Checkbox(c, revealed, "显示密码").Tooltip("仅显示本次输入；已保存的密码不会回显")
+	})
 	return input
 }

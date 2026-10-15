@@ -12,6 +12,7 @@ import shutil
 import subprocess
 import tempfile
 import zipfile
+import code_signing
 
 ROOT = Path(__file__).resolve().parent.parent
 
@@ -74,7 +75,7 @@ def build(target, output, archive=False, build_number=None):
                 info = plistlib.loads(info_path.read_bytes())
                 info['CFBundleVersion'] = build_number
                 info_path.write_bytes(plistlib.dumps(info))
-            run('codesign', '--force', '--deep', '--sign', '-', str(product))
+            code_signing.sign_app(product)
             run('codesign', '--verify', '--deep', '--strict', str(product))
             destination = output / product.name
         else:

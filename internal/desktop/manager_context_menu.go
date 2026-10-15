@@ -70,10 +70,14 @@ func (a *App) managerContextMenu(m *ui.Menu, id string) {
 				return
 			}
 			if m.Item("重命名…").Disabled(r.group == "Links").Chosen() {
-				a.openDirectory("移动 / 重命名目录", r.group)
+				a.beginManagerRename(r)
 				return
 			}
 		} else {
+			if m.Item("重命名…").Chosen() {
+				a.beginManagerRename(r)
+				return
+			}
 			if m.Item("连接").Chosen() {
 				a.connectManagerSelection()
 				return

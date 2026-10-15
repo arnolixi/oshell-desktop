@@ -24,3 +24,7 @@ require (
 tool github.com/egoist/mygo/cmd/mygo
 
 replace github.com/egoist/mygo => ./third_party/mygo
+
+replace github.com/jlaffaye/ftp => ./third_party/ftp
+
+replace github.com/pkg/sftp => ./third_party/sftp

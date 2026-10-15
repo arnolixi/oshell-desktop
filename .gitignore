@@ -13,3 +13,7 @@ __pycache__/
 /state-transaction.json
 .env
 .env.local
+
+/.release-private/
+*.p12
+*.pfx
