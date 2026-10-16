@@ -45,15 +45,17 @@ func ReadNativeStorage(directory string, master []byte) (NativeStorageSnapshot, 
 			return result, fmt.Errorf("原版存储位置设置无效：%w", err)
 		}
 		if state.Current != nil {
-			if !filepath.IsAbs(*state.Current) {
-				return result, fmt.Errorf("原版同步目录不是绝对路径")
-			}
-			result.SyncDirectory = filepath.Clean(*state.Current)
+			// A copied modern replica remains usable when its original sync
+			// directory belongs to another OS or is no longer mounted.
+			result.SyncDirectory = *state.Current
 			_, localErr := os.Stat(filepath.Join(base, "configuration.json"))
 			if localErr != nil && !os.IsNotExist(localErr) {
 				return result, localErr
 			}
 			if state.ReplicaVersion == nil || *state.ReplicaVersion != 2 || os.IsNotExist(localErr) {
+				if !filepath.IsAbs(*state.Current) {
+					return result, fmt.Errorf("原版同步目录不是绝对路径")
+				}
 				result.Directory, err = filepath.EvalSymlinks(*state.Current)
 				if err != nil {
 					return result, err

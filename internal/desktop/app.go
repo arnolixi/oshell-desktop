@@ -33,6 +33,7 @@ type pane struct {
 	profile                core.Profile
 	term                   *terminal.Terminal
 	conn                   *core.Connection
+	fileSource             *core.Connection // SSH session that opened this file pane, including while connecting.
 	cancel                 context.CancelFunc
 	status                 string
 	closed                 bool
@@ -40,11 +41,13 @@ type pane struct {
 	files                  *fileState
 }
 type node struct {
-	id            string
-	pane          *pane
-	first, second *node
-	vertical      bool
-	size          float32
+	id                                    string
+	pane                                  *pane
+	first, second                         *node
+	vertical                              bool
+	size                                  float32
+	splitRatio, splitExtent, splitApplied float32
+	bounds                                ui.Rect
 }
 type tab struct {
 	zoomed   *pane
@@ -89,7 +92,7 @@ type App struct {
 	managerRow                                      int
 	managerRename                                   *managerRenameState
 	authPasswordRevealed                            bool
-	managerList                                     ui.ListState
+	managerList                                     *ui.ListState
 	history                                         []string
 	query, selected, status, quick                  string
 	editing, authOpen, confirmSend                  bool
@@ -111,7 +114,7 @@ type App struct {
 func Run() error { return runDesktop() }
 func newApp(s *core.Store, c core.Config) *App {
 	v, err := core.OpenVault(s.Dir)
-	a := &App{store: s, config: c, trust: &core.TrustStore{Path: filepath.Join(s.Dir, "known_hosts")}, managerRow: -1, status: "就绪", vault: v}
+	a := &App{store: s, config: c, trust: &core.TrustStore{Path: filepath.Join(s.Dir, "known_hosts")}, managerRow: -1, managerList: &ui.ListState{}, status: "就绪", vault: v}
 	if err != nil {
 		a.status = "密码库读取失败：" + err.Error()
 	}
@@ -523,6 +526,9 @@ func (a *App) openConnection(profile core.Profile, cred core.Credentials, split 
 	filesOnly := a.opensAsFileSession(profile) && !cred.OpenTerminal
 	ctx, cancel := context.WithCancel(context.Background())
 	p := &pane{externalLaunch: cred.ExternalLaunch, terminalOnly: cred.OpenTerminal, hostname: profile.Host, id: core.NewID(), profile: profile, cancel: cancel, status: "正在连接…"}
+	if filesOnly {
+		p.fileSource = source
+	}
 	p.owner.Store(a)
 	a.initializeHostname(p)
 	n := &node{id: core.NewID(), pane: p}
@@ -573,7 +579,7 @@ func (a *App) openConnection(profile core.Profile, cred core.Credentials, split 
 		replace = func(v *node) {
 			if v.pane == t.active {
 				old := *v
-				*v = node{id: core.NewID(), first: &old, second: n, vertical: split == 2, size: 400}
+				*v = node{id: core.NewID(), first: &old, second: n, vertical: split == 2, splitRatio: .5}
 				return
 			}
 			if v.pane == nil {
@@ -809,6 +815,7 @@ func (a *App) openConnection(profile core.Profile, cred core.Credentials, split 
 			return transferHandler(ctx, upload, stream)
 		}
 		opts.CopyOnSelect = settings.Input.CopyOnSelect
+		opts.KeyAliases = terminalKeyAliases(settings.KeyboardShortcuts)
 		opts.RightClickPaste = settings.Input.RightClickPaste
 		opts.TrimCopyLeading = settings.Input.TrimLeading
 		opts.TrimCopyTrailing = settings.Input.TrimTrailing

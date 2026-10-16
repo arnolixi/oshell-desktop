@@ -52,3 +52,53 @@ func TestColorInputRejectsInvalidHexWithoutPanic(t *testing.T) {
 		t.Fatal("valid hex rejected")
 	}
 }
+
+func TestCursorColorModeApplyAndCancel(t *testing.T) {
+	store := &core.Store{Dir: t.TempDir()}
+	a := newApp(store, core.DefaultConfig())
+	a.prepareSettings()
+	if !a.features.colorDraft.AutoCursor {
+		t.Fatal("built-in theme should use automatic cursor contrast")
+	}
+	tt := ui.NewTester(a.colorSettings, 900, 1100)
+	if err := tt.Click("光标颜色自动对比背景"); err != nil {
+		t.Fatal(err)
+	}
+	tt.Frame()
+	if a.features.colorDraft.AutoCursor {
+		t.Fatal("automatic mode did not turn off")
+	}
+	if err := tt.Click("光标颜色选择器"); err != nil {
+		t.Fatal(err)
+	}
+	if err := tt.Click("Red"); err != nil {
+		t.Fatal(err)
+	}
+	tt.Key(0, ui.KeyEscape)
+	tt.Frame()
+	if a.features.colorDraft.Cursor != "#EF4444" {
+		t.Fatal("custom cursor color did not update")
+	}
+	a.applySettings()
+	saved, err := store.Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	scheme := saved.Settings.Scheme()
+	if scheme.AutoCursor || scheme.Cursor != "#EF4444" || terminalTheme(scheme).AutoCursor {
+		t.Fatal("custom mode was not persisted")
+	}
+	a.prepareSettings()
+	a.features.colorDraft.AutoCursor = true
+	a.closeSettings()
+	a.prepareSettings()
+	if a.features.colorDraft.AutoCursor {
+		t.Fatal("cancel persisted draft mode")
+	}
+	a.features.colorDraft.AutoCursor = true
+	a.applySettings()
+	saved, err = store.Load()
+	if err != nil || !saved.Settings.Scheme().AutoCursor {
+		t.Fatal("automatic mode was not persisted", err)
+	}
+}

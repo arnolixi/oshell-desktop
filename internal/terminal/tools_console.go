@@ -150,9 +150,7 @@ func (c *ToolsConsole) run() {
 			changed()
 		}
 		c.managed.Store(command.ManagedInputAllowed())
-		_, _ = io.Copy(c.writer, proc)
-		code, _ := proc.Wait()
-		proc.Close()
+		code := drainToolProcess(c.writer, proc)
 		c.mu.Lock()
 		c.process = nil
 		c.processName = ""

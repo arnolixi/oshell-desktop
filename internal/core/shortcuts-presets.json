@@ -1,5 +1,15 @@
 [
   {
+    "id": "terminalDeleteWord",
+    "title": "终端：删除前一个单词（同 Ctrl+W）",
+    "defaults": [{"keyCode": 51, "modifiers": 4}]
+  },
+  {
+    "id": "terminalLineStart",
+    "title": "终端：跳到行首（同 Ctrl+A）",
+    "defaults": [{"keyCode": 115, "modifiers": 0}]
+  },
+  {
     "id": "newWindow",
     "title": "新建窗口",
     "defaults": [

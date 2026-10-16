@@ -88,6 +88,9 @@ func (a *App) arrangeActive(mode string) {
 	if a.filesVisible {
 		w -= 340
 	}
+	if t.root.bounds.W > 0 && t.root.bounds.H > 0 {
+		w, h = t.root.bounds.W, t.root.bounds.H
+	}
 	var build func([]*pane, float32, float32) *node
 	build = func(ps []*pane, width, height float32) *node {
 		if len(ps) == 1 {
@@ -95,15 +98,15 @@ func (a *App) arrangeActive(mode string) {
 		}
 		mid := len(ps) / 2
 		vertical := mode == "vertical" || (mode == "tile" && height > width)
-		n := &node{id: core.NewID(), vertical: vertical}
+		n := &node{id: core.NewID(), vertical: vertical, splitRatio: float32(mid) / float32(len(ps))}
 		if vertical {
-			n.size = height * float32(mid) / float32(len(ps))
-			n.first = build(ps[:mid], width, n.size)
-			n.second = build(ps[mid:], width, height-n.size)
+			firstHeight := (height+1)*n.splitRatio - 1
+			n.first = build(ps[:mid], width, firstHeight)
+			n.second = build(ps[mid:], width, height-1-firstHeight)
 		} else {
-			n.size = width * float32(mid) / float32(len(ps))
-			n.first = build(ps[:mid], n.size, height)
-			n.second = build(ps[mid:], width-n.size, height)
+			firstWidth := (width+1)*n.splitRatio - 1
+			n.first = build(ps[:mid], firstWidth, height)
+			n.second = build(ps[mid:], width-1-firstWidth, height)
 		}
 		return n
 	}

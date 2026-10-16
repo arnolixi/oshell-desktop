@@ -37,7 +37,9 @@ func ParseToolCommand(text string) (LocalToolCommand, error) {
 			continue
 		}
 		if c == '\\' && quote != '\'' {
-			if runtime.GOOS == "windows" && (strings.Contains(word.String(), ":") || strings.HasPrefix(word.String(), `\`)) {
+			if runtime.GOOS == "windows" {
+				// Backslashes are path separators, including relative and UNC
+				// paths. They must not silently consume the following character.
 				word.WriteRune(c)
 			} else {
 				escaped = true
@@ -78,7 +80,10 @@ func ParseToolCommand(text string) (LocalToolCommand, error) {
 	if len(words) == 0 {
 		return out, fmt.Errorf("请输入工具名称")
 	}
-	name := strings.TrimSuffix(filepath.Base(words[0]), ".exe")
+	name := filepath.Base(words[0])
+	if strings.EqualFold(filepath.Ext(name), ".exe") {
+		name = name[:len(name)-4]
+	}
 	found := false
 	for _, n := range LocalTools {
 		if strings.EqualFold(name, n) {

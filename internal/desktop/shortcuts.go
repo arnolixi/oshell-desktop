@@ -82,7 +82,12 @@ func (a *App) shortcuts(c *ui.Context) {
 	if a.settingsOpen || a.modalActive() {
 		return
 	}
+	p := a.activePane()
+	terminalFocused := p != nil && p.term != nil && (p.focus.FocusWithin(c) || c.Resolve(p.focus).FocusWithin())
 	for _, action := range core.ShortcutActions {
+		if core.TerminalEditingAction(action.ID) {
+			continue // Encoded by the focused terminal, never by application shortcuts.
+		}
 		if a.features.findOpen && action.ID != "find" && action.ID != "findNext" && action.ID != "findPrevious" {
 			continue
 		}
@@ -92,12 +97,21 @@ func (a *App) shortcuts(c *ui.Context) {
 			}
 		}
 		for _, key := range a.config.Settings.KeyboardShortcuts.Bindings(action.ID, runtime.GOOS) {
+			if terminalFocused && terminalControlShortcut(shortcutMods(key), shortcutKey(key.KeyCode)) {
+				continue
+			}
 			if uikey := shortcutKey(key.KeyCode); uikey != ui.KeyUnknown && c.Shortcut(shortcutMods(key), uikey) {
 				a.performAction(action.ID)
 				return
 			}
 		}
 	}
+}
+
+// Plain Control letters are terminal editing/signalling keys. Application
+// shortcuts may still use them when focus is outside the terminal.
+func terminalControlShortcut(mods ui.Modifiers, key ui.Key) bool {
+	return mods == ui.Ctrl && key >= ui.KeyA && key <= ui.KeyZ
 }
 func lockedWindowAction(action string) bool {
 	return action == "quit" || action == "hide" || action == "minimize"
@@ -230,6 +244,8 @@ func (a *App) performAction(action string) {
 		if p != nil && p.conn != nil {
 			a.toggleFiles()
 		}
+	case "fileManager":
+		a.showFileManager()
 	case "quickCommands":
 		a.openCommands()
 	case "highlights":
@@ -261,6 +277,7 @@ func (a *App) shortcutsSettings(c *ui.Context) {
 		k.Overrides = map[string]core.ShortcutOverride{}
 	}
 	ui.Text(c, "键盘快捷键").Bold()
+	ui.Text(c, "终端编辑替代键仅在终端内生效；Ctrl+W、Ctrl+A 等原有控制键保持不变。行首替代键也可使用 Home。").TextColor(c.Theme().TextMuted)
 	ui.TextInput(c, &f.shortcutFilter).Placeholder("筛选操作名称")
 	if f.shortcutError != "" {
 		ui.Text(c, f.shortcutError).TextColor(c.Theme().Danger)
@@ -304,7 +321,7 @@ func (a *App) shortcutCapture(c *ui.Context) {
 					return false
 				}
 				s, ok := shortcutEvent(ev)
-				if !ok {
+				if !ok && !s.ValidFor(f.settingsCapture, runtime.GOOS) {
 					f.shortcutError = "请使用带修饰键的组合，或 F1–F20"
 					return true
 				}
@@ -320,6 +337,15 @@ func (a *App) shortcutCapture(c *ui.Context) {
 	}
 }
 func (h *applicationHub) installMenu() {
+	if runtime.GOOS == "windows" {
+		// The workspace renders the complete menu in its single header row.
+		mygo.App.SetMenu(nil)
+		return
+	}
+	mygo.App.SetMenu(mygo.NewMenu(h.menuItems()))
+}
+
+func (h *applicationHub) menuItems() []*mygo.MenuItem {
 	item := func(id string) *mygo.MenuItem {
 		label := id
 		for _, action := range core.ShortcutActions {
@@ -330,7 +356,7 @@ func (h *applicationHub) installMenu() {
 		}
 		acc := " "
 		bindings := h.config.Settings.KeyboardShortcuts.Bindings(id, runtime.GOOS)
-		if len(bindings) > 0 {
+		if len(bindings) > 0 && !terminalControlShortcut(shortcutMods(bindings[0]), shortcutKey(bindings[0].KeyCode)) {
 			acc = bindings[0].Display(runtime.GOOS)
 		}
 		disabled := false
@@ -339,7 +365,7 @@ func (h *applicationHub) installMenu() {
 				disabled = true
 			}
 		}
-		entry := &mygo.MenuItem{Label: label, Accelerator: acc, Disabled: disabled, Click: func(_ *mygo.MenuItem, w *mygo.Window) {
+		entry := &mygo.MenuItem{ID: id, Label: label, Accelerator: acc, Disabled: disabled, Click: func(_ *mygo.MenuItem, w *mygo.Window) {
 			if h.quitting {
 				return
 			}
@@ -412,7 +438,7 @@ func (h *applicationHub) installMenu() {
 	appMenu.Submenu = append(appMenu.Submenu, h.workspaceMenuItem(h.updateMenuLabel(), func(a *App) { a.invokeUpdater() }), mygo.Separator(), item("quit"))
 	viewMenu := menu("视图", "focusFullscreen", "-", "splitVertical", "splitHorizontal", "zoomPane", "nextPane", "previousPane", "-", "nextTab", "previousTab", "recentTab", "tabNumber", "tab1", "tab2", "tab3", "tab4", "tab5", "tab6", "tab7", "tab8", "tab9", "-", "newGroup", "showGroups", "arrangeTabs", "arrangeHorizontal", "arrangeVertical", "arrangeTiled")
 	viewMenu.Submenu = append(viewMenu.Submenu, h.workspaceMenuItem("刷新标题识别", func(a *App) { a.refreshActiveHostFromMenu() }))
-	mygo.App.SetMenu(mygo.NewMenu([]*mygo.MenuItem{
+	return []*mygo.MenuItem{
 		appMenu,
 		sessionMenu,
 		h.nativeQuickConnectionMenu(),
@@ -421,7 +447,7 @@ func (h *applicationHub) installMenu() {
 		menu("窗口", "newWindow", "closePane", "closeTab", "-", "hide", "minimize"),
 		h.nativeCommandMenu(),
 		menu("工具", "logging", "links", "quickSend", "focusQuickSend", "composer", "syncInput", "stopSync", "files", "quickCommands", "highlights", "appearance"),
-	}))
+	}
 }
 
 func (a *App) acceptCapturedShortcut(shortcut core.KeyboardShortcut) bool {
@@ -429,8 +455,8 @@ func (a *App) acceptCapturedShortcut(shortcut core.KeyboardShortcut) bool {
 	if f.settingsCapture == "" {
 		return false
 	}
-	if !shortcut.Valid() {
-		f.shortcutError = "请使用有效的组合键或 F1–F20"
+	if !shortcut.ValidFor(f.settingsCapture, runtime.GOOS) {
+		f.shortcutError = "请使用有效组合键或功能键；终端替代键也支持 Home，不能占用原有 Ctrl+字母控制键。"
 		return false
 	}
 	if other := f.settingsDraft.KeyboardShortcuts.Conflict(shortcut, f.settingsCapture, runtime.GOOS); other != "" {

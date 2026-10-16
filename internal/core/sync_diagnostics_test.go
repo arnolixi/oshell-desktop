@@ -7,6 +7,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 	"time"
 )
@@ -55,7 +56,7 @@ func TestSyncDiagnosticsRedactionPersistenceAndExport(t *testing.T) {
 		t.Fatal("last success lost on reopen", e)
 	}
 	info, e := os.Stat(d.path())
-	if e != nil || info.Mode().Perm() != 0600 {
+	if e != nil || !info.Mode().IsRegular() || runtime.GOOS != "windows" && info.Mode().Perm() != 0600 {
 		t.Fatal("diagnostics permissions", e)
 	}
 }

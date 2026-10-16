@@ -183,7 +183,7 @@ func AtomicWrite(path string, data []byte) error {
 	if err != nil {
 		return err
 	}
-	return os.Rename(name, path)
+	return replaceStateFile(name, path)
 }
 func ReadBounded(path string) ([]byte, error) {
 	f, err := os.Open(path)

@@ -24,6 +24,10 @@ type ShortcutAction struct {
 	Defaults []KeyboardShortcut `json:"defaults"`
 }
 
+func TerminalEditingAction(id string) bool {
+	return id == "terminalDeleteWord" || id == "terminalLineStart"
+}
+
 //go:embed shortcuts-presets.json
 var shortcutPresetJSON []byte
 var ShortcutActions = func() []ShortcutAction {
@@ -38,6 +42,19 @@ var ShortcutKeyNames = map[uint16]string{0: "A", 11: "B", 8: "C", 2: "D", 14: "E
 func (s KeyboardShortcut) Valid() bool {
 	name, ok := ShortcutKeyNames[s.KeyCode]
 	return ok && s.Modifiers >= 0 && s.Modifiers < 16 && (s.Modifiers&7 != 0 || len(name) > 1 && name[0] == 'F' && name[1] >= '1' && name[1] <= '9')
+}
+
+func (s KeyboardShortcut) ValidFor(action, platform string) bool {
+	if !TerminalEditingAction(action) {
+		return s.Valid()
+	}
+	// Keep the original Control-letter commands available to the shell.
+	n := normalizedShortcut(s, platform)
+	name := ShortcutKeyNames[n.KeyCode]
+	if n.Modifiers == 4 && len(name) == 1 && name[0] >= 'A' && name[0] <= 'Z' {
+		return false
+	}
+	return s.Valid() || s.KeyCode == 115 && s.Modifiers == 0
 }
 func (s KeyboardShortcut) Display(platform string) string {
 	var parts []string
@@ -69,15 +86,21 @@ func (k KeyboardShortcuts) Bindings(action, platform string) []KeyboardShortcut 
 	for _, a := range ShortcutActions {
 		if a.ID == action {
 			out := append([]KeyboardShortcut(nil), a.Defaults...)
+			if platform != "windows" && TerminalEditingAction(action) {
+				out = nil
+			}
 			if platform != "darwin" && action == "focusFullscreen" {
 				out = []KeyboardShortcut{{KeyCode: 103}}
 			}
-			if platform != "darwin" && (action == "copy" || action == "paste") {
+			if platform != "darwin" && (action == "copy" || action == "paste" || action == "selectAll") {
 				for i := range out {
 					out[i].Modifiers |= 8
 				}
 			}
-			if action == "focusFullscreen" || action == "zoomPane" || action == "nextPane" || action == "previousPane" || action == "quickSwitch" {
+			if platform != "darwin" && action == "closePane" {
+				out = []KeyboardShortcut{{KeyCode: 13, Modifiers: 3}} // Ctrl+Alt+W; Ctrl+W belongs to the terminal.
+			}
+			if TerminalEditingAction(action) || action == "focusFullscreen" || action == "zoomPane" || action == "nextPane" || action == "previousPane" || action == "quickSwitch" || platform != "darwin" && (action == "selectAll" || action == "closePane") {
 				filtered := out[:0]
 				for _, binding := range out {
 					conflict := false
@@ -123,7 +146,7 @@ func (k KeyboardShortcuts) Validate(platform string) error {
 	for _, a := range ShortcutActions {
 		known[a.ID] = true
 		for _, s := range k.Bindings(a.ID, platform) {
-			if !s.Valid() {
+			if !s.ValidFor(a.ID, platform) {
 				return fmt.Errorf("%s 的快捷键无效", a.Title)
 			}
 			if other := k.Conflict(s, a.ID, platform); other != "" {

@@ -1,10 +1,20 @@
 # OShell Desktop
 
 Go 共用核心、mygo 原生 UI 和 Ghostty VT 终端实现，功能参考 macOS OShell 0.2.74。
-本机只保留最新 macOS arm64 应用；Windows amd64 兼容包由 GitHub Actions 构建。
+当前构建、测试和打包目标仅为 Windows amd64，生成绿色便携包。
 本项目不替换原 Swift OShell，数据目录相互独立。
 
 ## 本机使用与构建
+
+Windows 使用 Go 1.27.1+ 和 Python 3：
+
+```powershell
+python scripts/build.py --target windows/amd64 --archive
+```
+
+完整解压 `dist/OShell-Desktop-windows-amd64.zip` 后启动 `OShell Desktop.exe`。
+若输出目录已产生配置、凭据或其他额外文件，构建会拒绝覆盖；使用 `--out` 指定干净目录，防止数据丢失或被打入发布包。
+本机和 CI 均只构建 Windows；以下 macOS 说明保留供历史维护参考。
 
 要求 Apple Silicon、macOS 13+、Go 1.27.1 和 Python 3。开发构建显式使用 ad-hoc 签名：
 
@@ -31,14 +41,13 @@ go run .
 
 ## GitHub Actions
 
-工作流 `.github/workflows/build.yml` 在 macOS / Windows 上运行核心测试、编译和静态检查；
-macOS 另跑桌面回归。测试通过后分别生成 macOS arm64、Windows amd64 ZIP，
+工作流 `.github/workflows/build.yml` 仅在 Windows 上运行全量回归（包含桌面与终端）、核心与 PTY 竞态检测、编译和静态检查。
+测试通过后生成 Windows amd64 ZIP，
 从 Actions 页面的 Artifacts 下载，无需在本机保留兼容包。
 
 CI 使用统一入口：
 
 ```sh
-python scripts/build.py --target darwin/arm64 --archive
 python scripts/build.py --target windows/amd64 --archive
 ```
 
@@ -58,6 +67,10 @@ Windows 包带有 `oshell-portable` 标记，配置、凭据等数据直接存�
 - 空闲终端原位复用、连接状态圆点、已连接标签双击复制、标签栏全区域右键菜单。
 - 主密码与本机凭据保护、共享目录 / WebDAV 同步及冲突处理。会话属性 / 登录密码可切换本次输入显隐，已存密码不回显；修改目标后留空沿用并重新加密，取消保存则删除凭据。
 - 配色与颜色选择器、键盘快捷键、自定义数据目录。
+- 内置主题默认启用光标自动对比：按当前背景选择清晰的黑色或白色光标，光标内文字使用相反颜色。在“设置 → 主题与配色”关闭“光标颜色自动对比背景”后，可自行设置光标与光标文字颜色；已有自定义方案保留原设置。
+- 终端聚焦时，普通 `Ctrl+字母` 优先交给终端程序处理，保留 `Ctrl+A` 行首、`Ctrl+E` 行尾、`Ctrl+W` 向前删词等常见 Shell 编辑操作；具体行为遵循当前 Shell / 程序的键位设置。Windows 默认全选为 `Ctrl+Shift+A`、关闭分屏为 `Ctrl+Alt+W`、关闭标签为 `Ctrl+Shift+W`。
+- Windows 终端额外支持 `Ctrl+Backspace`（同 `Ctrl+W`）和 `Home`（同 `Ctrl+A`）；在“设置 → 键盘快捷键”可修改或清除这两项终端替代键，保存后立即生效。替代键不会接管撰写框等普通输入框；已有自定义快捷键优先。
+- 终端左键双击选词、连续三击选行，支持继续拖动扩选；远端程序启用鼠标跟踪时，按住 `Shift` 使用本地选择。
 - 独立时钟设置：字体、8–96 点字号、颜色、0–100% 透明度与九宫格位置；无背景浮层不占终端行列。
 
 跨平台编译不等于实机验收；仍需核对 Windows 原生交互、实际更新安装/重启和真实服务兼容性。

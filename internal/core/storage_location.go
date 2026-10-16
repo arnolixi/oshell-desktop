@@ -122,11 +122,8 @@ func storageTarget(source, target string) (string, error) {
 	if target == src {
 		return target, nil
 	}
-	rel, _ := filepath.Rel(src, target)
-	back, _ := filepath.Rel(target, src)
-	outside := func(p string) bool { return p == ".." || strings.HasPrefix(p, ".."+string(filepath.Separator)) }
-	if !outside(rel) || !outside(back) {
-		return "", fmt.Errorf("新目录不能是当前目录的父目录或子目录")
+	if err := validateStorageSeparation(src, target); err != nil {
+		return "", err
 	}
 	if info, err := os.Lstat(target); err == nil {
 		if !info.IsDir() || info.Mode()&os.ModeSymlink != 0 {

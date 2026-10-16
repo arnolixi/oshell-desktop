@@ -4,9 +4,11 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"syscall"
+	"time"
 	"unicode/utf16"
 	"unsafe"
 )
@@ -125,7 +127,10 @@ func (p *PTY) wait() (int, error) {
 	}
 	var code uint32
 	err := syscall.GetExitCodeProcess(p.process, &code)
+	p.mu.Lock()
 	syscall.CloseHandle(p.process)
+	p.process = 0
+	p.mu.Unlock()
 	return int(code), err
 }
 
@@ -176,11 +181,31 @@ func (p *PTY) Close() error {
 		procClosePseudoConsole.Call(console)
 		p.out.Close()
 	}()
+	// A child closed before it attaches to the console can miss the console
+	// shutdown notification. Reap it after a grace period as well.
+	if p.pid != 0 {
+		go func() {
+			timer := time.NewTimer(time.Second)
+			defer timer.Stop()
+			select {
+			case <-p.exited:
+			case <-timer.C:
+				p.Kill()
+			}
+		}()
+	}
 	return nil
 }
 
 // Kill kills the process.
-func (p *PTY) Kill() error { return syscall.TerminateProcess(p.process, 1) }
+func (p *PTY) Kill() error {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if p.process == 0 {
+		return os.ErrProcessDone
+	}
+	return syscall.TerminateProcess(p.process, 1)
+}
 
 // coord packs a COORD, which ConPTY takes by value.
 func coord(cols, rows int) uintptr {
@@ -191,6 +216,19 @@ func coord(cols, rows int) uintptr {
 // them; args[0] is the program's name.
 func commandLine(path string, args []string) string {
 	parts := []string{syscall.EscapeArg(path)}
+	if strings.EqualFold(filepath.Base(path), "cmd.exe") {
+		for i := 1; i+1 < len(args); i++ {
+			if (strings.EqualFold(args[i], "/c") || strings.EqualFold(args[i], "/k")) && i+2 == len(args) {
+				// cmd parses command strings itself, not with the C runtime's
+				// backslash quoting. /s strips exactly our outer quote pair.
+				parts = append(parts, "/s")
+				for _, arg := range args[1 : i+1] {
+					parts = append(parts, syscall.EscapeArg(arg))
+				}
+				return strings.Join(parts, " ") + ` "` + args[i+1] + `"`
+			}
+		}
+	}
 	if len(args) > 1 {
 		for _, a := range args[1:] {
 			parts = append(parts, syscall.EscapeArg(a))

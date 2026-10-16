@@ -1,18 +1,23 @@
 package core
 
 import (
+	"os"
 	"os/exec"
 	"strings"
 	"testing"
 )
 
 func TestHostProbeCommandReportsWithoutFiles(t *testing.T) {
+	shell, err := exec.LookPath("sh")
+	if err != nil {
+		t.Skip("remote POSIX probe execution requires a POSIX shell; parser and token checks run on every platform")
+	}
 	command, e := HostProbeCommand("OSHELL_INFO_test:")
 	if e != nil {
 		t.Fatal(e)
 	}
-	cmd := exec.Command("/bin/sh", "-c", command)
-	cmd.Env = []string{"PATH=/usr/bin:/bin:/usr/sbin:/sbin", "SSH_CONNECTION=192.0.2.1 44000 198.51.100.67 22"}
+	cmd := exec.Command(shell, "-c", command)
+	cmd.Env = append(os.Environ(), "SSH_CONNECTION=192.0.2.1 44000 198.51.100.67 22")
 	out, e := cmd.Output()
 	if e != nil {
 		t.Fatal(e)
@@ -23,9 +28,11 @@ func TestHostProbeCommandReportsWithoutFiles(t *testing.T) {
 	}
 	identity, ok := ParseHostIdentity(strings.TrimSuffix(strings.TrimPrefix(string(out), prefix), "\x07"))
 	if !ok || identity.Address != "198.51.100.67" {
-		t.Fatal(identity, ok)
+		t.Fatalf("invalid identity %+v (%v), probe output %q", identity, ok, out)
 	}
-	if _, e = HostProbeCommand("';touch bad;"); e == nil {
+}
+func TestHostProbeRejectsUnsafeToken(t *testing.T) {
+	if _, e := HostProbeCommand("';touch bad;"); e == nil {
 		t.Fatal("unsafe token")
 	}
 }

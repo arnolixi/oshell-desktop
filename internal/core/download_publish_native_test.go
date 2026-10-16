@@ -1,4 +1,4 @@
-//go:build darwin
+//go:build darwin || windows
 
 package core
 
@@ -6,6 +6,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"runtime"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -34,6 +35,9 @@ func TestDownloadPublicationNeverReplacesExistingDestinations(t *testing.T) {
 					err = os.Mkdir(dest, 0700)
 				case "symlink":
 					err = os.Symlink("unrelated-target", dest)
+					if err != nil && runtime.GOOS == "windows" {
+						t.Skipf("symlink permission unavailable: %v", err)
+					}
 				}
 				if err != nil {
 					t.Fatal(err)

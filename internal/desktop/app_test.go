@@ -6,6 +6,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"runtime"
 	"slices"
 	"sync"
 	"testing"
@@ -82,7 +83,11 @@ func TestTerminalWorkspaceAndClose(t *testing.T) {
 	a.tabs = []*tab{workspace}
 	tt := ui.NewTester(a.view, 1280, 820)
 	tt.Frame()
-	if err := tt.Click("分屏"); err != nil {
+	splitMenu := "分屏"
+	if runtime.GOOS == "windows" {
+		splitMenu = "视图"
+	}
+	if err := tt.Click(splitMenu); err != nil {
 		t.Fatal(err)
 	}
 	if err := tt.ChooseMenuItem("左右分屏"); err != nil {

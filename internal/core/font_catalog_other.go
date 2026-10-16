@@ -18,6 +18,7 @@ func platformFonts(ctx context.Context) ([]FontEntry, error) {
 	} else {
 		command = exec.CommandContext(ctx, "fc-list", ":charset=20-7e", "-f", "%{family[0]}\t%{spacing}\n")
 	}
+	prepareCommand(command)
 	var out limitedOutput
 	command.Stdout = &out
 	if e := command.Run(); e != nil {

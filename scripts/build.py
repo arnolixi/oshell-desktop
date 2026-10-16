@@ -23,6 +23,13 @@ def run(*args, env=None):
 
 def publish(source, destination):
     """Stage the complete result before replacing the previous build."""
+    if (source / 'oshell-portable').is_file() and destination.exists():
+        # Portable apps store credentials beside the executable. Rebuilding
+        # must neither delete those files nor include them in a release ZIP.
+        incoming_files = {p.relative_to(source) for p in source.rglob('*') if p.is_file()}
+        for existing in destination.rglob('*'):
+            if existing.is_file() and existing.relative_to(destination) not in incoming_files:
+                raise RuntimeError('Portable output contains local data or extra files; choose a clean --out directory.')
     destination.parent.mkdir(parents=True, exist_ok=True)
     with tempfile.TemporaryDirectory(prefix='.oshell-publish-', dir=destination.parent) as folder:
         incoming = Path(folder) / destination.name

@@ -22,12 +22,18 @@ func safeEntry(name string) bool {
 	if name == "" || name == "." || name == ".." || strings.ContainsAny(name, "/\\\x00:\"<>|?*") || strings.TrimRight(name, " .") != name || strings.ContainsFunc(name, unicode.IsControl) {
 		return false
 	}
-	base := strings.ToUpper(strings.SplitN(name, ".", 2)[0])
-	if base == "CON" || base == "PRN" || base == "AUX" || base == "NUL" {
+	base := strings.ToUpper(strings.TrimRight(strings.SplitN(name, ".", 2)[0], " "))
+	if base == "CON" || base == "PRN" || base == "AUX" || base == "NUL" || base == "CONIN$" || base == "CONOUT$" {
 		return false
 	}
 	if len(base) == 4 && (strings.HasPrefix(base, "COM") || strings.HasPrefix(base, "LPT")) && base[3] >= '1' && base[3] <= '9' {
 		return false
+	}
+	if strings.HasPrefix(base, "COM") || strings.HasPrefix(base, "LPT") {
+		switch base[3:] {
+		case "¹", "²", "³":
+			return false
+		}
 	}
 	return true
 }

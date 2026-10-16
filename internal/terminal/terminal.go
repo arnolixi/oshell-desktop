@@ -60,7 +60,9 @@ type Options struct {
 	TransferFinished           func(error)
 
 	// Input callbacks run on the UI thread; output callbacks on the reader.
-	OnUserInput                                                      func(ui.InputEvent)
+	OnUserInput func(ui.InputEvent)
+	// KeyAliases add alternative keys before the terminal protocol encoder.
+	KeyAliases                                                       []KeyAlias
 	OnUserPaste                                                      func(string)
 	BeforePaste                                                      func(string) bool
 	OnOutput                                                         func([]byte)
@@ -217,6 +219,7 @@ func New(opts Options) (*Terminal, error) {
 		return nil, err
 	}
 	opts.Font.Features = append([]string(nil), opts.Font.Features...)
+	opts.KeyAliases = append([]KeyAlias(nil), opts.KeyAliases...)
 	t := &Terminal{opts: opts, done: make(chan struct{})}
 	if opts.TransferHandler != nil {
 		t.transfers = newTransferController(t)
@@ -413,7 +416,8 @@ func environment(extra []string) []string {
 	set := func(kv string) {
 		k, _, _ := strings.Cut(kv, "=")
 		for i, e := range env {
-			if strings.HasPrefix(e, k+"=") {
+			key, _, _ := strings.Cut(e, "=")
+			if key == k || runtime.GOOS == "windows" && strings.EqualFold(key, k) {
 				env[i] = kv
 				return
 			}

@@ -65,7 +65,6 @@ func (a *App) view(c *ui.Context) {
 	if a.features.syncEnabled && !a.features.syncOpen {
 		a.pruneSyncTargets()
 	}
-	a.shortcuts(c)
 	a.refreshPaneVisibility()
 	ui.Column(c).Fill().Children(func() {
 		if !a.focusFullscreen.chrome {
@@ -90,9 +89,12 @@ func (a *App) view(c *ui.Context) {
 		}
 	})
 	a.rememberInputFocus(c)
+	// Register shortcuts after terminal handles and initial focus are bound.
+	// Otherwise the first Control key can be claimed by the previous frame.
+	a.shortcuts(c)
 	a.dialogs(c)
 }
-func (a *App) toolbar(c *ui.Context) {
+func (a *App) legacyToolbar(c *ui.Context) {
 	ui.Toolbar(c, func() {
 		toolButton(c, "会话管理", folderIcon, "会话管理").OnClick(a.openManager)
 		ui.MenuButton(c, "快捷连接", a.connectionMenu).Height(25).FontSize(12)
@@ -563,7 +565,7 @@ func (a *App) welcome(c *ui.Context) {
 }
 func (a *App) nodeView(c *ui.Context, t *tab, n *node) {
 	if n.pane == nil {
-		a.terminalSplit(c.Key(n.id), &n.size, n.vertical, func() { a.nodeView(c, t, n.first) }, func() { a.nodeView(c, t, n.second) })
+		a.paneSplit(c.Key(n.id), n, func() { a.nodeView(c, t, n.first) }, func() { a.nodeView(c, t, n.second) })
 		return
 	}
 	p := n.pane

@@ -23,7 +23,13 @@ func (a *App) navigateManager(group string) {
 	a.managerRow = -1
 	a.managerSelection.Clear()
 	a.selected = ""
-	a.managerList = ui.ListState{Columns: a.managerList.Columns}
+	a.resetManagerList()
+}
+
+// Menu callbacks can navigate while Table is still building its cells. Keep
+// that frame's ListState alive until layout and pending input have finished.
+func (a *App) resetManagerList() {
+	a.managerList = &ui.ListState{Columns: a.managerList.Columns}
 }
 
 // Keep selection by identity when filtering, never by its old table position.
@@ -31,7 +37,7 @@ func (a *App) refreshManagerSearchSelection() {
 	rows := a.managerRows()
 	// Filtering changes row positions. Drop the old list anchor before assigning
 	// the retained identity, otherwise the widget restores a now-hidden row.
-	a.managerList = ui.ListState{Columns: a.managerList.Columns}
+	a.resetManagerList()
 	a.managerRow = -1
 	a.selected = ""
 	query := core.NewSessionQuery(a.query)

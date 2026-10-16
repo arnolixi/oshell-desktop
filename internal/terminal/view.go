@@ -23,7 +23,13 @@ import (
 // elsewhere) to open a hyperlink (OSC 8) on click.
 func View(c *ui.Context, t *Terminal) ui.Element {
 	v := t.viewOf(c)
-	e := ui.Box(c).Focusable().FocusRing(false).Cursor(ui.CursorText).Clip().Label("Terminal")
+	pointer := ui.CursorText
+	if runtime.GOOS == "windows" {
+		// The thin I-beam disappears among terminal glyphs. The system arrow
+		// is easier to locate and respects Windows pointer size/color settings.
+		pointer = ui.CursorDefault
+	}
+	e := ui.Box(c).Focusable().FocusRing(false).Cursor(pointer).Clip().Label("Terminal")
 	v.build(c, e)
 	e.HandleInput(func(ev ui.InputEvent) bool {
 		if !t.Available() {
@@ -95,15 +101,17 @@ type view struct {
 	lines     []rowCache
 	shaped    lru
 
-	keys    *vt.KeyEncoder
-	mouse   *vt.MouseEncoder
-	gesture *vt.Gesture
+	keys         *vt.KeyEncoder
+	mouse        *vt.MouseEncoder
+	gesture      *vt.Gesture
+	gestureStart time.Time
 
 	// pending is a key that types text, until the text comes; preedit
 	// is an input method's composition and its caret.
-	pending      *pendingKey
-	preedit      string
-	preeditCaret int
+	pending        *pendingKey
+	pressedAliases map[ui.Key]KeyAlias
+	preedit        string
+	preeditCaret   int
 
 	focused    bool
 	blinkStart time.Time
@@ -167,6 +175,7 @@ func (v *view) build(c *ui.Context, e ui.Element) {
 		if !focused {
 			// Input methods drop their composition with the focus.
 			v.preedit, v.pending = "", nil
+			v.pressedAliases = nil
 		}
 	}
 	v.resetHiddenScrollbar()
@@ -249,6 +258,9 @@ func (v *view) menu(m *ui.Menu) {
 
 // input handles the input of the view as it comes.
 func (v *view) input(ev ui.InputEvent) bool {
+	if ev.Kind == ui.InputKeyDown || ev.Kind == ui.InputKeyUp {
+		ev = v.aliasKeyEvent(ev)
+	}
 	switch ev.Kind {
 	case ui.InputKeyDown:
 		return v.keyDown(ev)
@@ -522,6 +534,7 @@ func (v *view) pointerEvent(ev ui.InputEvent) bool {
 			return false
 		}
 		v.gesture = g
+		v.gestureStart = time.Now()
 	}
 	col, row := v.cellAt(ev.X, ev.Y)
 	px, py := float64(ev.X*v.scale), float64(ev.Y*v.scale)
@@ -550,7 +563,7 @@ func (v *view) pointerEvent(ev ui.InputEvent) bool {
 			return false
 		}
 		v.selecting = true
-		if s, ok := v.gesture.Press(t.term, ref, px, py, uint64(time.Now().UnixNano())); ok {
+		if s, ok := v.gesture.Press(t.term, ref, px, py, uint64(time.Since(v.gestureStart))); ok {
 			t.term.SetSelection(&s)
 		} else {
 			t.term.SetSelection(nil)

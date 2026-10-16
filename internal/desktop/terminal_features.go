@@ -169,6 +169,7 @@ func (a *App) applyTerminalPreferences(p *pane) {
 		a.status = "历史设置错误：" + e.Error()
 	}
 	p.term.SetInputPolicy(s.Input.CopyOnSelect, s.Input.RightClickPaste, s.Input.TrimLeading, s.Input.TrimTrailing)
+	p.term.SetKeyAliases(terminalKeyAliases(s.KeyboardShortcuts))
 	rules, e := highlightRules(a.config.ActiveHighlightRules(p.hostname))
 	if e != nil {
 		a.status = "突出显示配置错误：" + e.Error()

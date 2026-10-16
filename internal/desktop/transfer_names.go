@@ -49,13 +49,26 @@ func downloadUnique(ctx context.Context, client core.RemoteFileSystem, remote, d
 	if !core.SafeTransferName(name) {
 		return fmt.Errorf("远程文件名无效")
 	}
-	entries, err := os.ReadDir(directory)
+	target, err := uniqueLocalTransferPath(directory, name)
 	if err != nil {
 		return err
 	}
-	names := map[string]bool{}
-	for _, entry := range entries {
-		names[entry.Name()] = true
+	return client.Download(ctx, remote, target, false, progress)
+}
+
+// Ask the destination filesystem: it may be case-insensitive, or a Windows
+// directory explicitly configured as case-sensitive. Remote names are untouched.
+func uniqueLocalTransferPath(directory, name string) (string, error) {
+	for index := 0; ; index++ {
+		next := name
+		if index > 0 {
+			next = fmt.Sprintf("%s.%d", name, index)
+		}
+		target := filepath.Join(directory, next)
+		if _, err := os.Lstat(target); os.IsNotExist(err) {
+			return target, nil
+		} else if err != nil {
+			return "", err
+		}
 	}
-	return client.Download(ctx, remote, filepath.Join(directory, uniqueTransferName(name, names)), false, progress)
 }

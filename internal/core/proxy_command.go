@@ -58,12 +58,7 @@ func dialProxyCommand(ctx context.Context, template string, p Profile) (net.Conn
 	if e != nil {
 		return nil, e
 	}
-	var cmd *exec.Cmd
-	if runtime.GOOS == "windows" {
-		cmd = exec.CommandContext(ctx, "cmd.exe", "/d", "/s", "/c", command)
-	} else {
-		cmd = exec.CommandContext(ctx, "/bin/sh", "-c", command)
-	}
+	cmd := proxyShellCommand(ctx, command)
 	prepareCommand(cmd)
 	inRead, input, e := os.Pipe()
 	if e != nil {
@@ -78,6 +73,10 @@ func dialProxyCommand(ctx context.Context, template string, p Profile) (net.Conn
 	cmd.Stdin = inRead
 	cmd.Stdout = outWrite
 	cmd.Stderr = io.Discard
+	c := &commandConn{reader: output, writer: input, command: cmd, done: make(chan struct{})}
+	// Killing just the shell leaves its child holding the pipes open. Cancel
+	// the connection and process tree together so blocked SSH reads wake up.
+	cmd.Cancel = func() error { return c.Close() }
 	if e = cmd.Start(); e != nil {
 		inRead.Close()
 		input.Close()
@@ -87,7 +86,6 @@ func dialProxyCommand(ctx context.Context, template string, p Profile) (net.Conn
 	}
 	inRead.Close()
 	outWrite.Close()
-	c := &commandConn{reader: output, writer: input, command: cmd, done: make(chan struct{})}
 	go func() { cmd.Wait(); close(c.done) }()
 	return c, nil
 }

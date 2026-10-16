@@ -69,9 +69,6 @@ func TestProxyCommandRejectsUnsupportedExpansion(t *testing.T) {
 	}
 }
 func TestSCPRecursiveTransfers(t *testing.T) {
-	if runtime.GOOS == "windows" {
-		t.Skip("OpenSSH Windows SCP server path semantics need manual acceptance")
-	}
 	if _, e := exec.LookPath("scp"); e != nil {
 		t.Skip("OpenSSH scp unavailable")
 	}
@@ -85,7 +82,7 @@ func TestSCPRecursiveTransfers(t *testing.T) {
 	source := filepath.Join(t.TempDir(), "tree")
 	os.MkdirAll(filepath.Join(source, "sub"), 0700)
 	os.WriteFile(filepath.Join(source, "sub", "中文.txt"), []byte(strings.Repeat("payload", 10000)), 0600)
-	remote := filepath.Join(t.TempDir(), "remote-tree")
+	remote := filepath.ToSlash(filepath.Join(t.TempDir(), "remote-tree"))
 	if e = conn.SCPUpload(context.Background(), source, remote, nil); e != nil {
 		t.Fatal(e)
 	}

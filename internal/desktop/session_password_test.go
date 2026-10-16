@@ -155,14 +155,25 @@ func TestSessionEditorLateCancelNeverStartsConnection(t *testing.T) {
 }
 
 func TestSessionEditorCancellationStopsIdentityResolutionBeforeCommit(t *testing.T) {
-	if runtime.GOOS != "darwin" {
-		t.Skip("macOS ssh -G cancellation fixture")
-	}
 	binaryDir := t.TempDir()
 	started := filepath.Join(binaryDir, "started")
-	script := "#!/bin/sh\n: > \"$OSHELL_SSH_EDIT_STARTED\"\nexec /bin/sleep 30\n"
-	if err := os.WriteFile(filepath.Join(binaryDir, "ssh"), []byte(script), 0700); err != nil {
-		t.Fatal(err)
+	if runtime.GOOS == "windows" {
+		exe, err := os.Executable()
+		if err != nil {
+			t.Fatal(err)
+		}
+		data, err := os.ReadFile(exe)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err = os.WriteFile(filepath.Join(binaryDir, "ssh.exe"), data, 0700); err != nil {
+			t.Fatal(err)
+		}
+	} else {
+		script := "#!/bin/sh\n: > \"$OSHELL_SSH_EDIT_STARTED\"\nexec /bin/sleep 30\n"
+		if err := os.WriteFile(filepath.Join(binaryDir, "ssh"), []byte(script), 0700); err != nil {
+			t.Fatal(err)
+		}
 	}
 	t.Setenv("PATH", binaryDir+string(os.PathListSeparator)+os.Getenv("PATH"))
 	t.Setenv("OSHELL_SSH_EDIT_STARTED", started)

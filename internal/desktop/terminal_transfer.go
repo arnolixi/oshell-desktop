@@ -189,7 +189,7 @@ func (f *transferFile) Close() error {
 	if e := f.file.Close(); e != nil {
 		return e
 	}
-	return os.Link(f.file.Name(), f.target)
+	return core.PublishDownloadedFile(f.file.Name(), f.target)
 }
 func (a *App) terminalTransferView(c *ui.Context, p *pane) {
 	if !p.transfer.visible {

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 )
 
@@ -59,7 +60,7 @@ func TestSharedConflictDraftRestartAndLatestRemote(t *testing.T) {
 		t.Fatal("draft leaked connection metadata")
 	}
 	info, err := os.Stat(store.path())
-	if err != nil || info.Mode().Perm() != 0600 {
+	if err != nil || !info.Mode().IsRegular() || runtime.GOOS != "windows" && info.Mode().Perm() != 0600 {
 		t.Fatal("draft not owner-only", err)
 	}
 	if _, err = store.Load([]byte("wrong-master")); err == nil {

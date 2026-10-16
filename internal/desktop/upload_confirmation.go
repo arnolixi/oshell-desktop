@@ -16,6 +16,7 @@ type uploadConfirmation struct {
 	files          *fileState
 	paths          []string
 	directory, err string
+	baseDirectory  string
 }
 
 func (a *App) canPrepareUpload(p *pane) bool {
@@ -25,7 +26,7 @@ func (a *App) prepareUpload(p *pane, paths []string) {
 	if !a.canPrepareUpload(p) || len(paths) == 0 {
 		return
 	}
-	a.features.uploadDraft = &uploadConfirmation{open: true, pane: p, files: p.files, paths: append([]string(nil), paths...), directory: p.files.dir}
+	a.features.uploadDraft = &uploadConfirmation{open: true, pane: p, files: p.files, paths: append([]string(nil), paths...), directory: p.files.dir, baseDirectory: p.files.dir}
 }
 func (a *App) uploadDroppedOn(p *pane, paths []string, name string) {
 	if !a.canPrepareUpload(p) || len(paths) == 0 {
@@ -86,7 +87,7 @@ func (a *App) uploadConfirmationDialog(c *ui.Context) {
 						draft.err = "请输入有效的远程目录"
 						return
 					}
-					paths, directory := append([]string(nil), draft.paths...), draft.directory
+					paths, directory := append([]string(nil), draft.paths...), resolveRemoteDirectory(draft.baseDirectory, draft.directory)
 					clear()
 					a.withTransfer(p, func(ctx context.Context, client core.RemoteFileSystem) error {
 						return uploadUnique(ctx, client, paths, directory, a.transferProgress(p, ctx))

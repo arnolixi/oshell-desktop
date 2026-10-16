@@ -4,7 +4,9 @@ import (
 	"context"
 	"github.com/egoist/mygo/ui"
 	"net"
+	"os"
 	"oshell-desktop/internal/zmodem"
+	"runtime"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -75,7 +77,11 @@ func TestClosingTerminalDoesNotCreateFallback(t *testing.T) {
 
 func TestRealProcessFinalOutputSurvivesFallback(t *testing.T) {
 	loadLib(t)
-	term, e := New(Options{Command: []string{"/bin/sh", "-c", "printf 'FIRST_LINE\\nFINAL_SENTINEL\\n'"}, LocalToolsOnExit: true, NoBlink: true})
+	command := []string{"/bin/sh", "-c", "printf 'FIRST_LINE\\nFINAL_SENTINEL\\n'"}
+	if runtime.GOOS == "windows" {
+		command = []string{os.Getenv("COMSPEC"), "/d", "/c", "echo FIRST_LINE& echo FINAL_SENTINEL"}
+	}
+	term, e := New(Options{Command: command, LocalToolsOnExit: true, NoBlink: true})
 	if e != nil {
 		t.Fatal(e)
 	}

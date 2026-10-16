@@ -346,6 +346,12 @@ func (a *App) composerView(c *ui.Context) {
 	if !o.composerOpen {
 		return
 	}
+	// Use an opaque highlight so selection remains distinct from the input
+	// surface, while preserving readable text in either appearance.
+	selection := ui.Hex("#6099DF")
+	if c.Theme().Dark {
+		selection = ui.Hex("#2563EB")
+	}
 	ui.Column(c).Height(245).MinHeight(180).Padding(8).Gap(6).BorderWidth(1, 0, 0, 0).BorderColor(c.Theme().Border).Children(func() {
 		ui.Row(c).Gap(8).Children(func() {
 			ui.Text(c, "多行命令撰写").Bold()
@@ -354,7 +360,7 @@ func (a *App) composerView(c *ui.Context) {
 			ui.Button(c, "收起").OnClick(func() { o.composerOpen = false })
 		})
 		ui.Row(c).Grow(1).MinHeight(0).Gap(10).Children(func() {
-			ui.TextArea(c, &o.composerText).Label("撰写命令内容").AutoFocus().Font(terminalFamily(a.config.Settings.FontFamily)).Bind(&o.composerFocus).Grow(1).FillHeight()
+			ui.TextArea(c, &o.composerText).Label("撰写命令内容").SelectionColor(selection).AutoFocus().Font(terminalFamily(a.config.Settings.FontFamily)).Bind(&o.composerFocus).Grow(1).FillHeight()
 			ui.Scroll(c).Width(240).Gap(5).Children(func() { a.targetChoices(c, o.composerTargets) })
 		})
 		ui.Row(c).Gap(8).Children(func() {

@@ -46,6 +46,16 @@ func TestNativeStorageReadsLegacyExternalAndModernLocalReplica(t *testing.T) {
 	if err != nil || snapshot.LegacyExternal {
 		t.Fatal("modern source did not use local replica", err)
 	}
+	if snapshot.SyncDirectory != "/missing-remote" {
+		t.Fatal("original sync location was lost")
+	}
+	state, _ = json.Marshal(map[string]any{"current": "relative-invalid"})
+	if err = os.WriteFile(filepath.Join(local, "storage-location.json"), state, 0600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = ReadNativeStorage(local, master); err == nil {
+		t.Fatal("legacy relative sync directory accepted")
+	}
 	after, _ := os.ReadFile(filepath.Join(remote, "configuration.json"))
 	if string(after) != string(original) {
 		t.Fatal("source modified")

@@ -47,7 +47,7 @@ func terminalFamily(name string) string {
 	return name
 }
 func terminalTheme(s core.ColorScheme) *terminal.Theme {
-	t := &terminal.Theme{Foreground: ui.Hex(s.Foreground), Background: ui.Hex(s.Background), Cursor: ui.Hex(s.Cursor), CursorText: ui.Hex(s.CursorText), Selection: ui.Hex(s.Selection), SelectionText: ui.Hex(s.SelectionText)}
+	t := &terminal.Theme{Foreground: ui.Hex(s.Foreground), Background: ui.Hex(s.Background), Cursor: ui.Hex(s.Cursor), CursorText: ui.Hex(s.CursorText), AutoCursor: s.AutoCursor, Selection: ui.Hex(s.Selection), SelectionText: ui.Hex(s.SelectionText)}
 	for i, c := range s.ANSI {
 		t.Palette[i] = ui.Hex(c)
 	}

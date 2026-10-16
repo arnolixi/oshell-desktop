@@ -57,8 +57,8 @@ func runDesktop() error {
 	hub := &applicationHub{store: store, config: cfg, vault: initial.vault, trust: initial.trust}
 	mygo.Theme.SetSource(mygo.ThemeSource(cfg.Settings.InterfaceTheme))
 	mygo.App.WhenReady(func() {
-		hub.attach(initial)
 		hub.installMenu()
+		hub.attach(initial)
 		hub.installDockMenu()
 		hub.startExternalLaunch()
 		hub.initializeUpdates()
@@ -178,29 +178,7 @@ func (h *applicationHub) attach(a *App) {
 	a.win.OnHide(a.refreshPaneVisibility)
 	a.win.OnMinimize(a.refreshPaneVisibility)
 	a.win.OnRestore(a.refreshPaneVisibility)
-	a.win.OnClose(func(e *mygo.CloseEvent) {
-		if a.features.localConflict.active {
-			e.PreventDefault()
-			a.cancelLocalConflict()
-			return
-		}
-		if a.features.sessionPassword.busy {
-			e.PreventDefault()
-			a.cancelSessionPassword()
-			return
-		}
-
-		if a.features.sharedSync.busy {
-			e.PreventDefault()
-			a.status = "配置同步正在进行，请等待完成或在同步设置中取消"
-			return
-		}
-
-		if !h.quitting && !a.features.allowClose && a.activeConnections() > 0 {
-			e.PreventDefault()
-			a.confirmExit(false)
-		}
-	})
+	a.win.OnClose(a.onWorkspaceClose)
 	h.scheduleSharedSync(2 * time.Second)
 	h.scheduleUpdates()
 	a.win.OnClosed(func() {

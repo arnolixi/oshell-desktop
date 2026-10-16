@@ -322,6 +322,8 @@ func (a *App) colorSettings(c *ui.Context) {
 		ui.Button(c, "导入").OnClick(a.importColorSettings)
 		ui.Button(c, "导出").OnClick(a.exportColorSettings)
 	})
+	ui.Checkbox(c, &f.colorDraft.AutoCursor, "光标颜色自动对比背景")
+	ui.Text(c, "自动选择清晰的黑色或白色光标；关闭后可自定义光标和光标文字颜色。").FontSize(12).TextColor(c.Theme().TextMuted)
 	a.colorSchemePreview(c)
 	fields := []struct {
 		label string
@@ -329,6 +331,9 @@ func (a *App) colorSettings(c *ui.Context) {
 	}{{"背景", &f.colorDraft.Background}, {"文字", &f.colorDraft.Foreground}, {"光标", &f.colorDraft.Cursor}, {"光标文字", &f.colorDraft.CursorText}, {"选区背景", &f.colorDraft.Selection}, {"选区文字", &f.colorDraft.SelectionText}}
 	ui.Grid(c).Columns(3).Gap(10).Children(func() {
 		for _, field := range fields {
+			if f.colorDraft.AutoCursor && (field.label == "光标" || field.label == "光标文字") {
+				continue
+			}
 			colorSettingField(c.Key(field.label), field.label, field.value)
 		}
 	})

@@ -59,7 +59,18 @@ type fileState struct {
 	lease                        func()
 }
 
+type fileReadNotice struct {
+	status string
+	failed bool
+}
+
 func (a *App) loadFiles(p *pane, dir string) {
+	a.readFiles(p, dir, nil)
+}
+
+// A failed or cancelled batch may have completed some items. Refresh the list
+// without replacing its operation result with a misleading item count.
+func (a *App) readFiles(p *pane, dir string, notice *fileReadNotice) {
 	if p == nil || (p.conn == nil && p.ftp == nil) || p.closed {
 		return
 	}
@@ -70,6 +81,7 @@ func (a *App) loadFiles(p *pane, dir string) {
 	if f.busy {
 		return
 	}
+	dir = resolveRemoteDirectory(f.dir, dir)
 	f.busy = true
 	f.readGeneration++
 	generation := f.readGeneration
@@ -94,15 +106,18 @@ func (a *App) loadFiles(p *pane, dir string) {
 		}
 
 		if err != nil {
-			postPane(p, func(_ *App) {
-				if p.files != f || f.readGeneration != generation {
+			postFileReadResult(p, func() {
+				if p.closed || p.files != f || f.readGeneration != generation {
 					return
 				}
 				f.readCancel = nil
 				f.busy = false
 				f.status = "读取目录失败：" + err.Error()
+				if notice != nil {
+					f.status = notice.status + "；" + f.status
+				}
 				f.statusError = true
-			})
+			}, func() {})
 			return
 		}
 		stop := context.AfterFunc(ctx, func() { client.Close() })
@@ -122,14 +137,17 @@ func (a *App) loadFiles(p *pane, dir string) {
 			}
 			return order.CompareString(entries[i].Name(), entries[j].Name()) < 0
 		})
-		if !a.post(func() {
+		discard := func() {
+			go func() {
+				client.Close()
+				if lease != nil {
+					lease()
+				}
+			}()
+		}
+		postFileReadResult(p, func() {
 			if p.closed || p.files != f || f.readGeneration != generation {
-				go func() {
-					client.Close()
-					if lease != nil {
-						lease()
-					}
-				}()
+				discard()
 				return
 			}
 			f.readCancel = nil
@@ -151,6 +169,9 @@ func (a *App) loadFiles(p *pane, dir string) {
 			f.busy = false
 			if err != nil {
 				f.status = "读取目录失败：" + err.Error()
+				if notice != nil {
+					f.status = notice.status + "；" + f.status
+				}
 				f.statusError = true
 				p.status = "读取目录失败"
 				return
@@ -196,11 +217,38 @@ func (a *App) loadFiles(p *pane, dir string) {
 				}
 			}
 			f.status = fmt.Sprintf("%d 个项目", len(entries))
-		}) {
-			client.Close()
-			lease()
-		}
+			if notice != nil {
+				f.status = notice.status
+				f.statusError = notice.failed
+			}
+		}, discard)
 	}()
+}
+
+// Follow a moved pane even if its old window closes between enqueue and drain.
+// The result still runs for a disposed pane so its generation check can release
+// a client that was opened after disposal started.
+func postFileReadResult(p *pane, apply, discard func()) {
+	for {
+		owner := p.owner.Load()
+		if owner == nil {
+			discard()
+			return
+		}
+		if owner.post(func() {
+			if p.owner.Load() != owner {
+				postFileReadResult(p, apply, discard)
+				return
+			}
+			apply()
+		}) {
+			return
+		}
+		if p.owner.Load() == owner {
+			discard()
+			return
+		}
+	}
 }
 func (a *App) filesView(c *ui.Context, p *pane) { a.fileBrowser(c, p, false) }
 func (a *App) fileBrowser(c *ui.Context, p *pane, full bool) {
@@ -570,6 +618,9 @@ func (a *App) transferDone(p *pane, task *fileTransfer, err error) {
 				f.status = "操作失败：" + err.Error()
 				f.statusError = true
 			}
+			if task.refresh {
+				owner.readFiles(p, refreshDirectory, &fileReadNotice{status: f.status, failed: f.statusError})
+			}
 		} else {
 			f.status = "操作完成"
 			owner.status = "文件操作完成"
@@ -630,6 +681,8 @@ func (a *App) download(p *pane) {
 	}
 	for _, name := range names {
 		if !core.SafeTransferName(name) {
+			p.files.status = fmt.Sprintf("无法下载 %q：文件名不兼容本地文件系统，请先在服务器上重命名", name)
+			p.files.statusError = true
 			return
 		}
 	}

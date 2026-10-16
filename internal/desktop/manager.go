@@ -256,7 +256,7 @@ func (a *App) managerView(c *ui.Context) {
 		a.managerList.Label = func(i int) string { return rows[i].name }
 
 		columns := []ui.TableColumn{{Title: "名称", Width: 210, MinWidth: 160}, {Title: "协议", Width: 64, MinWidth: 56}, {Title: "主机", Width: 190, MinWidth: 140}, {Title: "用户名", Width: 100, MinWidth: 80}, {Title: "端口", Width: 60, MinWidth: 56}, {Title: "目录", Width: 160, MinWidth: 100}, {Title: "", Width: 36, MinWidth: 36}}
-		table := ui.Table(c, &a.managerList, columns, len(rows), func(row, col int) {
+		table := ui.Table(c, a.managerList, columns, len(rows), func(row, col int) {
 			r := rows[row]
 			p := r.profile
 			textColor, iconColor := c.Theme().Text, c.Theme().Accent

@@ -72,7 +72,9 @@ func (a *App) deleteRemote(p *pane) {
 		return
 	}
 	for _, name := range names {
-		if !core.SafeTransferName(name) {
+		if !validRemoteFileName(name) {
+			f.status = fmt.Sprintf("无法删除 %q：远程项目名称无效", name)
+			f.statusError = true
 			return
 		}
 	}
@@ -89,6 +91,11 @@ func (a *App) deleteRemote(p *pane) {
 }
 
 func removeRemoteSelection(ctx context.Context, client core.RemoteFileSystem, directory string, names []string) error {
+	for _, name := range names {
+		if !validRemoteFileName(name) {
+			return fmt.Errorf("远程项目名称无效：%q", name)
+		}
+	}
 	for _, name := range names {
 		if err := ctx.Err(); err != nil {
 			return err
@@ -125,7 +132,7 @@ func (a *App) applyFileAction() {
 		return
 	}
 	name := f.fileName
-	if name == "" || name == "." || name == ".." || strings.ContainsAny(name, "/\\") || strings.ContainsFunc(name, unicode.IsControl) {
+	if !validRemoteFileName(name) {
 		f.fileError = "请填写不含路径分隔符或控制字符的名称"
 		return
 	}
@@ -151,4 +158,19 @@ func (a *App) applyFileAction() {
 		}
 		return client.Rename(from, to)
 	}, directory)
+}
+
+// Remote-only operations do not create Windows files. Allow server names such
+// as report:2026 and NUL, while keeping each operation inside its chosen folder.
+func validRemoteFileName(name string) bool {
+	return name != "" && name != "." && name != ".." && !strings.ContainsAny(name, "/\\") && !strings.ContainsFunc(name, unicode.IsControl)
+}
+
+// Initial directories still resolve against the server's login directory.
+// Once browsing an absolute directory, relative input is relative to that view.
+func resolveRemoteDirectory(current, requested string) string {
+	if path.IsAbs(current) && !path.IsAbs(requested) {
+		return path.Join(current, requested)
+	}
+	return requested
 }

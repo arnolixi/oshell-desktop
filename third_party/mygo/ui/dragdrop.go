@@ -33,6 +33,13 @@ type valueDrag struct {
 // gets it when the pointer is released (Drop). A press dragging is no
 // click. Dragging reports the drag.
 func (e *node) Drag(value any) *node {
+	// A passive drag handle in a list cell becomes the pointer target. Give
+	// its clicks to the row too, retaining selection, modifiers and submission.
+	// Buttons and editors keep their own actions; an actual drag emits no click.
+	if row := e.c.row; row != nil && row.f.s.cursor() != nil && e.flags&(flagClickable|flagEditable|flagSelectable) == 0 {
+		*valueBinding[listRowInput](e) = listRowInput{f: row.f, i: row.i}
+		e.onValueInput(listRowValueInput)
+	}
 	e.flags |= flagDraggable | flagHover
 	e.st.dragValue = value
 	if d := e.c.rt.drag; d != nil && d.src == e.id {

@@ -10,14 +10,24 @@ import (
 )
 
 func TestToolConnectionStatusChangesForSSHAndTelnetOnly(t *testing.T) {
-	if runtime.GOOS == "windows" {
-		t.Skip("Unix fixture executables")
-	}
 	for _, name := range []string{"ssh", "telnet", "ping"} {
 		t.Run(name, func(t *testing.T) {
 			dir := t.TempDir()
 			file := filepath.Join(dir, name)
-			if err := os.WriteFile(file, []byte("#!/bin/sh\n/bin/sleep 0.2\n"), 0700); err != nil {
+			data := []byte("#!/bin/sh\n/bin/sleep 0.2\n")
+			if runtime.GOOS == "windows" {
+				file += ".exe"
+				exe, err := os.Executable()
+				if err != nil {
+					t.Fatal(err)
+				}
+				data, err = os.ReadFile(exe)
+				if err != nil {
+					t.Fatal(err)
+				}
+				t.Setenv("OSHELL_TOOL_STATE_HELPER", "1")
+			}
+			if err := os.WriteFile(file, data, 0700); err != nil {
 				t.Fatal(err)
 			}
 

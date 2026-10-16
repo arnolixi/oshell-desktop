@@ -3,11 +3,6 @@ on:
   push:
   pull_request:
   workflow_dispatch:
-    inputs:
-      fixed_signing:
-        description: 'Require pinned macOS signing identity (repository secrets required)'
-        type: boolean
-        default: false
 permissions:
   contents: read
 jobs:
@@ -15,7 +10,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [windows-latest, macos-latest]
+        os: [windows-latest]
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
@@ -25,35 +20,28 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
-      - name: Test shared core
-        run: go test -race ./internal/core
+      - name: Core and PTY race checks
+        run: go test -race ./internal/core ./internal/terminal/internal/pty
+      - name: Full regression suite
+        run: go test -count=1 -timeout=180s ./...
       - name: Patched listing parsers
         run: go test github.com/jlaffaye/ftp github.com/pkg/sftp -run 'Test(UNIXMetadata|OwnerHints|Parse)'
       - name: Signing policy tests
         run: python scripts/test-code-signing.py
+      - name: Portable publication tests
+        run: python scripts/test-build.py
       - name: Compile native UI
         env:
           CGO_ENABLED: '0'
         run: go build ./...
       - name: Vet
         run: go vet ./...
-      - name: Native UI tests (macOS)
-        if: runner.os == 'macOS'
-        shell: bash
-        run: |
-          if [ "$(go env GOARCH)" = "arm64" ]; then
-            export MYGO_GHOSTTY_VT="$GITHUB_WORKSPACE/resources/darwin-arm64/oshell-ghostty-vt.dylib"
-          fi
-          go test ./internal/desktop
   package:
     needs: test
     strategy:
       fail-fast: false
       matrix:
         include:
-          - runner: macos-latest
-            target: darwin/arm64
-            artifact: macos-arm64
           - runner: windows-latest
             target: windows/amd64
             artifact: windows-amd64
@@ -69,10 +57,6 @@ jobs:
       - name: Package native application
         env:
           CGO_ENABLED: '0'
-          OSHELL_ALLOW_ADHOC: ${{ inputs.fixed_signing && '0' || '1' }}
-          OSHELL_REQUIRE_FIXED_SIGNING: ${{ inputs.fixed_signing && '1' || '0' }}
-          OSHELL_CODESIGN_P12: ${{ inputs.fixed_signing && secrets.OSHELL_CODESIGN_P12 || '' }}
-          OSHELL_CODESIGN_PASSWORD: ${{ inputs.fixed_signing && secrets.OSHELL_CODESIGN_PASSWORD || '' }}
         run: python scripts/build.py --target ${{ matrix.target }} --archive
       - uses: actions/upload-artifact@v4
         with:

@@ -45,10 +45,13 @@ func ResolveSSH(ctx context.Context, p Profile) (ResolvedSSH, error) {
 			args = append(args, "-i", expandHome(p.IdentityFile))
 		}
 		if os.Getenv("OSHELL_TEST_NO_AGENT") == "1" || os.Getenv("OSHELL_TEST_IGNORE_SSH_CONFIG") == "1" {
-			args = append(args, "-F", os.DevNull)
+			// OpenSSH's sentinel works with both native Windows and MSYS/Git
+			// builds; the latter interprets Windows' NUL as a missing filename.
+			args = append(args, "-F", "none")
 		}
 		args = append(args, "--", p.Host)
 		command := exec.CommandContext(ctx, binary, args...)
+		prepareCommand(command)
 		var out limitedOutput
 		command.Stdout = &out
 		if e = command.Run(); e == nil {

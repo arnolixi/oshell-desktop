@@ -318,7 +318,7 @@ func (a *App) commitSharedSync() {
 		// Reload disk even on a late replica-write failure: configuration may have
 		// committed already, and the UI must not keep an obsolete copy.
 		saved, loadErr := a.store.Load()
-		a.post(func() {
+		complete := func() {
 			f.busy = false
 			f.cancel = nil
 			a.setConfigurationBusy(false)
@@ -336,7 +336,12 @@ func (a *App) commitSharedSync() {
 				f.status = "同步完成"
 			}
 			a.status = f.status
-		})
+		}
+		if !a.post(complete) {
+			// A native/forced window close must not strand the shared busy
+			// flag. The application UI loop can outlive this window.
+			mygo.RunOnMain(complete)
+		}
 	}()
 }
 func (a *App) sharedSyncConflictDialog(c *ui.Context) {

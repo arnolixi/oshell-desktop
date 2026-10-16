@@ -3,6 +3,7 @@ package desktop
 import (
 	"fmt"
 	"github.com/egoist/mygo/ui"
+	"oshell-desktop/internal/terminal"
 	"strconv"
 )
 
@@ -61,12 +62,17 @@ func (a *App) colorSchemePreview(c *ui.Context) {
 		ui.Text(c, "色值格式有误，修正后恢复预览。").TextColor(c.Theme().Danger)
 		return
 	}
+	cursor, cursorText := ui.Hex(scheme.Cursor), ui.Hex(scheme.CursorText)
+	if scheme.AutoCursor {
+		cursor = terminal.CursorContrast(ui.Hex(scheme.Background))
+		cursorText = terminal.CursorContrast(cursor)
+	}
 	ui.Column(c).Padding(12).Gap(8).Radius(5).Background(ui.Hex(scheme.Background)).Children(func() {
 		ui.Text(c, "user@server:~$ ls -la").Font(terminalFamily(a.features.settingsDraft.FontFamily)).FontSize(14).TextColor(ui.Hex(scheme.Foreground))
 		ui.Row(c).Gap(8).Children(func() {
 			ui.Text(c, "终端文字 Aa 0123 中文").TextColor(ui.Hex(scheme.Foreground))
 			ui.Text(c, "选中文字").Padding(3, 6).Background(ui.Hex(scheme.Selection)).TextColor(ui.Hex(scheme.SelectionText))
-			ui.Text(c, "光标").Padding(3, 6).Background(ui.Hex(scheme.Cursor)).TextColor(ui.Hex(scheme.CursorText))
+			ui.Text(c, "光标").Padding(3, 6).Background(cursor).TextColor(cursorText)
 		})
 		ui.Grid(c).Columns(8).Gap(4).Children(func() {
 			for i, value := range scheme.ANSI {

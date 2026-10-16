@@ -367,7 +367,9 @@ func TestZskipInsteadOfZrpos(t *testing.T) {
 		t.Fatalf("sender did not exit after ZSKIP")
 	}
 	// gracefulClose should have emitted ZFIN + OO as its parting shot.
-	out := cap.Bytes()
+	// A net.Pipe write can finish before the capture goroutine appends its
+	// latest read. Synchronize with capture instead of sampling too early.
+	out := cap.WaitFor(t, func(b []byte) bool { return bytes.HasSuffix(b, []byte("OO")) }, time.Second)
 	if !containsZhexFrame(out, zmodem.FrameZFIN) {
 		t.Fatalf("expected ZFIN header after ZSKIP, got: %x", out)
 	}

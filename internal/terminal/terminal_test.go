@@ -288,6 +288,13 @@ func TestSelectAndCopy(t *testing.T) {
 	if got := tt.Clipboard(); got != "world" {
 		t.Errorf("double click copied %q", got)
 	}
+	// The very next click at the same position extends word to line.
+	tt.Press(x, y)
+	tt.Release(x, y)
+	tt.Key(copyMods, ui.KeyC)
+	if got := tt.Clipboard(); got != "hello world" {
+		t.Errorf("consecutive third click copied %q", got)
+	}
 	x, y = cellCenter(term, 2, 1)
 	for range 3 {
 		tt.Press(x, y)
@@ -696,6 +703,29 @@ func TestKeyWithoutText(t *testing.T) {
 	tt.Key(0, ui.KeyB)
 	if got := conn.take(1); got != "b" {
 		t.Errorf("sent %q", got)
+	}
+}
+
+func TestTerminalControlEditingKeys(t *testing.T) {
+	loadLib(t)
+	conn := newPipe()
+	term, err := New(Options{Conn: conn})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer term.Close()
+	tt := ui.NewTester(func(c *ui.Context) { View(c, term).Fill().AutoFocus() }, 400, 200)
+	for _, tc := range []struct {
+		key  ui.Key
+		want byte
+	}{
+		{ui.KeyA, 1}, {ui.KeyW, 23}, {ui.KeyE, 5}, {ui.KeyU, 21},
+		{ui.KeyK, 11}, {ui.KeyR, 18}, {ui.KeyC, 3}, {ui.KeyD, 4},
+	} {
+		tt.Key(ui.Ctrl, tc.key)
+		if got := conn.take(1); got != string([]byte{tc.want}) {
+			t.Fatalf("key %v sent %q", tc.key, got)
+		}
 	}
 }
 

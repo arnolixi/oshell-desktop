@@ -67,7 +67,7 @@ func TestRevealedPasswordKeepsUnicodeAndSelection(t *testing.T) {
 	value := "秘密🔐-é"
 	show := false
 	tt := ui.NewTester(func(c *ui.Context) { revealPasswordInput(c, &value, &show).AutoFocus() }, 600, 90)
-	tt.Key(ui.Super, ui.KeyA)
+	tt.Key(ui.Cmd, ui.KeyA)
 	if err := tt.Click("显示密码"); err != nil {
 		t.Fatal(err)
 	}
