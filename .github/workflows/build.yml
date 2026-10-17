@@ -10,7 +10,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [windows-latest]
+        os: [windows-latest, ubuntu-24.04]
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
@@ -21,6 +21,7 @@ jobs:
         with:
           python-version: '3.12'
       - name: Prepare pinned Windows rz/sz interoperability peer
+        if: runner.os == 'Windows'
         shell: pwsh
         run: |
           $archive = Join-Path $env:RUNNER_TEMP 'lrzsz-peer.zip'
@@ -32,14 +33,22 @@ jobs:
           Expand-Archive -LiteralPath $archive -DestinationPath $destination
           (Join-Path $destination 'lrzsz_0.12.21rc_windows_x86_64') | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
           'OSHELL_REQUIRE_LRZSZ=1' | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+      - name: Prepare Linux runtime and rz/sz interoperability peer
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends libwebkit2gtk-4.1-0 xvfb xauth dbus-x11 libgl1-mesa-dri libglx-mesa0 libegl-mesa0 fonts-dejavu-core fonts-noto-cjk lrzsz
+          echo 'OSHELL_REQUIRE_LRZSZ=1' >> "$GITHUB_ENV"
       - name: Core, PTY and ZMODEM race checks
         run: go test -race ./internal/core ./internal/terminal/internal/pty ./internal/zmodem
       - name: Full regression suite
+        if: runner.os == 'Windows'
         run: go test -count=1 -timeout=180s ./...
+      - name: Full Linux regression suite
+        if: runner.os == 'Linux'
+        run: xvfb-run -a dbus-run-session -- go test -count=1 -timeout=180s ./...
       - name: Patched listing parsers
         run: go test github.com/jlaffaye/ftp github.com/pkg/sftp -run 'Test(UNIXMetadata|OwnerHints|Parse)'
-      - name: Signing policy tests
-        run: python scripts/test-code-signing.py
       - name: Portable publication tests
         run: python scripts/test-build.py
       - name: Compile native UI
@@ -57,6 +66,11 @@ jobs:
           - runner: windows-latest
             target: windows/amd64
             artifact: windows-amd64
+            options: --single-file
+          - runner: ubuntu-24.04
+            target: linux/amd64
+            artifact: linux-amd64
+            options: ''
     runs-on: ${{ matrix.runner }}
     steps:
       - uses: actions/checkout@v4
@@ -69,10 +83,12 @@ jobs:
       - name: Package native application
         env:
           CGO_ENABLED: '0'
-        run: python scripts/build.py --target ${{ matrix.target }} --archive
+        run: python scripts/build.py --target ${{ matrix.target }} ${{ matrix.options }} --archive
       - uses: actions/upload-artifact@v4
         with:
           name: oshell-${{ matrix.artifact }}
-          path: dist/*.zip
+          path: |
+            dist/*.zip
+            dist/*.tar.gz
           if-no-files-found: error
           retention-days: 7

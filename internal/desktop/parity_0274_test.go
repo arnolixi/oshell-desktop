@@ -141,13 +141,41 @@ func TestManagerRenameBlurDoesNotSave(t *testing.T) {
 
 func TestFileRateControlsCompact(t *testing.T) {
 	f := &fileState{rateChoice: "自定义", rateCustom: "1.5", rateUnit: "MiB/s"}
-	tt := ui.NewTester(func(c *ui.Context) { ui.Column(c).Width(330).Children(func() { fileRateControls(c, f) }) }, 340, 150)
+	tt := ui.NewTester(func(c *ui.Context) {
+		ui.Row(c).Width(330).Padding(8).Children(func() {
+			ui.Text(c, "远程文件 · SFTP").Grow(1)
+			fileRateButton(c, f)
+		})
+	}, 340, 320)
+	tt.Frame()
+	if _, visible := tt.Find("自定义速率"); visible {
+		t.Fatal("rate editor is visible before clicking the toolbar button")
+	}
+	snapshot(t, tt, "file-rate-button.png")
+	if err := tt.Click("设置传输限速"); err != nil {
+		t.Fatal(err)
+	}
 	snapshot(t, tt, "file-rate-compact.png")
 	if err := tt.Click("应用限速"); err != nil {
 		t.Fatal(err)
 	}
 	if f.limiter.Rate() != 1572864 {
 		t.Fatal("rate not applied")
+	}
+	if err := tt.Click("关闭限速设置"); err != nil {
+		t.Fatal(err)
+	}
+	tt.Frame()
+	if f.rateOpen || !tt.HasText("限速 · 1.5 MiB/s") {
+		t.Fatal("closed editor did not retain the active rate", tt.Texts())
+	}
+	if err := tt.Click("设置传输限速"); err != nil {
+		t.Fatal(err)
+	}
+	tt.Key(0, ui.KeyEscape)
+	tt.Frame()
+	if f.rateOpen {
+		t.Fatal("Escape did not close the rate editor")
 	}
 }
 

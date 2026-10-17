@@ -27,6 +27,7 @@ type fileTransfer struct {
 type fileTransferContextKey struct{}
 
 type fileState struct {
+	rateOpen                     bool
 	rateUnit                     string
 	limiter                      core.TransferLimiter
 	rateChoice                   string
@@ -264,12 +265,15 @@ func (a *App) fileBrowser(c *ui.Context, p *pane, full bool) {
 		}
 	}
 	root.Children(func() {
-		ui.Row(c).Children(func() {
+		ui.Row(c).Gap(6).Children(func() {
 			protocol := "SFTP"
 			if p != nil && p.profile.Kind == "ftp" {
 				protocol = "FTP"
 			}
 			ui.Text(c, "远程文件 · "+protocol).Bold().Grow(1)
+			if p != nil && p.files != nil {
+				fileRateButton(c, p.files)
+			}
 			ui.Button(c, "×").Label("关闭文件面板").OnClick(func() {
 				if full {
 					if t := a.activeTab(); t != nil {
@@ -289,7 +293,6 @@ func (a *App) fileBrowser(c *ui.Context, p *pane, full bool) {
 			return
 		}
 		f := p.files
-		fileRateControls(c, f)
 		if p.conn != nil && f.protocol == "" {
 			f.protocol = "SFTP"
 		}

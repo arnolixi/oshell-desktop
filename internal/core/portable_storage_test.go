@@ -2,6 +2,7 @@ package core
 
 import (
 	"os"
+	"oshell-desktop/internal/bundled"
 	"path/filepath"
 	"testing"
 )
@@ -21,6 +22,32 @@ func TestPortableDirectoryUsesExecutableLocation(t *testing.T) {
 	}
 	if _, portable, err = portableStorageDirectory("windows", filepath.Join(t.TempDir(), "OShell Desktop.exe")); err != nil || portable {
 		t.Fatal("ordinary build unexpectedly portable")
+	}
+}
+
+func TestSingleFilePortableNeedsNoMarker(t *testing.T) {
+	root := t.TempDir()
+	directory, portable, err := portableStorageDirectoryWithMode("windows", filepath.Join(root, "renamed.exe"), true)
+	if err != nil || !portable || directory != root {
+		t.Fatal("single file lost portable storage", directory, err)
+	}
+	if _, portable, err := portableStorageDirectoryWithMode("darwin", filepath.Join(root, "app"), true); err != nil || portable {
+		t.Fatal("changed macOS storage", err)
+	}
+}
+
+func TestSingleFileStorageActivation(t *testing.T) {
+	if !bundled.Enabled() {
+		t.Skip("requires the single-file build's embedded payload")
+	}
+	t.Setenv("OSHELL_DATA_DIR", filepath.Join(t.TempDir(), "must-not-use"))
+	executable, err := os.Executable()
+	if err != nil {
+		t.Fatal(err)
+	}
+	directory, portable, err := defaultStorageDirectory()
+	if err != nil || !portable || directory != filepath.Dir(executable) {
+		t.Fatal("embedded build did not activate portable storage", directory, portable, err)
 	}
 }
 func TestPortableDataMovesWithFolderAndIgnoresOldLocator(t *testing.T) {

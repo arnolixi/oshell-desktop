@@ -1,6 +1,8 @@
 /dist/
 /validation/
 /mygo.ts
+/internal/bundled/payload_windows_amd64.go
+/internal/bundled/payload_windows_amd64.zip
 *.log
 .DS_Store
 __pycache__/

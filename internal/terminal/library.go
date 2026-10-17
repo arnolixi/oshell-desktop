@@ -43,6 +43,7 @@ func Load() error {
 
 // LibraryPath returns the libghostty-vt the terminal loads, the first of:
 //
+//   - the verified embedded DLL in a Windows single-file build;
 //   - the file $MYGO_GHOSTTY_VT names;
 //   - the one among the app's resources (mygo.PathResources), where `mygo
 //     build` and `mygo dev` put it, signed with the app on macOS;

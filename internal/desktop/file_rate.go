@@ -7,6 +7,27 @@ import (
 	"strings"
 )
 
+func fileRateButton(c *ui.Context, f *fileState) {
+	current, label := "不限速", "限速"
+	if rate := f.limiter.Rate(); rate > 0 {
+		current = bytesLabel(rate) + "/s"
+		label += " · " + current
+	}
+	button := ui.Button(c, label).Label("设置传输限速").Tooltip("当前：" + current).OnClick(func() {
+		f.rateOpen = !f.rateOpen
+	})
+	ui.Popover(c, button, &f.rateOpen, func() {
+		ui.Column(c).Width(300).Padding(8).Gap(10).Children(func() {
+			ui.Row(c).Gap(8).Children(func() {
+				ui.Text(c, "传输限速").Bold().Grow(1)
+				ui.Button(c, "×").Label("关闭限速设置").OnClick(func() { f.rateOpen = false })
+			})
+			fileRateControls(c, f)
+			ui.Text(c, "仅影响当前文件标签。SFTP / FTP 传输中即时生效，SCP 下次传输生效。").FontSize(11).TextColor(c.Theme().TextMuted).Wrap()
+		})
+	})
+}
+
 func fileRateControls(c *ui.Context, f *fileState) {
 	if f.rateChoice == "" {
 		f.rateChoice = "不限速"
@@ -21,7 +42,6 @@ func fileRateControls(c *ui.Context, f *fileState) {
 				f.rateError = ""
 			}
 		}
-		ui.Text(c, "仅当前标签").FontSize(11).TextColor(c.Theme().TextMuted).Tooltip("SFTP/FTP 传输中即时生效；SCP 下次传输生效")
 	})
 	if f.rateChoice == "自定义" {
 		ui.Row(c).Gap(6).Children(func() {
@@ -29,7 +49,7 @@ func fileRateControls(c *ui.Context, f *fileState) {
 			if f.rateUnit == "" {
 				f.rateUnit = "KiB/s"
 			}
-			ui.Select(c, &f.rateUnit, []string{"KiB/s", "MiB/s"}).Width(90)
+			ui.Select(c, &f.rateUnit, []string{"KiB/s", "MiB/s"}).Width(90).MinWidth(90)
 			input := ui.TextInput(c, &f.rateCustom).Label("自定义速率").Width(90)
 			apply := func() {
 				n, err := parseTransferRate(f.rateCustom, f.rateUnit)
@@ -48,7 +68,7 @@ func fileRateControls(c *ui.Context, f *fileState) {
 	}
 
 	if f.rateError != "" {
-		ui.Text(c, f.rateError).TextColor(c.Theme().Danger)
+		ui.Text(c, f.rateError).TextColor(c.Theme().Danger).Wrap()
 	}
 }
 

@@ -10,6 +10,7 @@ import (
 
 	"github.com/egoist/mygo"
 	"github.com/egoist/mygo/ui"
+	"oshell-desktop/internal/bundled"
 	"oshell-desktop/internal/core"
 )
 
@@ -51,6 +52,17 @@ func readAboutDetails() aboutDetails {
 	return value
 }
 func (a *App) openAboutDocument(name string) {
+	if bundled.Enabled() {
+		file, err := bundled.Path(name)
+		if err == nil {
+			err = mygo.Shell.OpenPath(file)
+		}
+		if err != nil {
+			a.features.settingsError = "无法打开随附文档：" + err.Error()
+			a.status = a.features.settingsError
+		}
+		return
+	}
 	resources, err := mygo.App.Path(mygo.PathResources)
 	if err == nil {
 		file := filepath.Join(resources, name)

@@ -13,6 +13,7 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"oshell-desktop/internal/bundled"
 	"path/filepath"
 	"runtime"
 	"strings"
@@ -54,6 +55,7 @@ func library(manifest []byte) (nativeFile, error) {
 // Find returns the libghostty-vt that manifest names for this platform,
 // the first of:
 //
+//   - the verified embedded DLL in a Windows single-file build;
 //   - the file $MYGO_GHOSTTY_VT names;
 //   - the one among the app's resources (mygo.PathResources), where `mygo
 //     build` and `mygo dev` put it, signed with the app on macOS;
@@ -65,6 +67,9 @@ func library(manifest []byte) (nativeFile, error) {
 //
 // Packaged apps never download it: build them with the CLI.
 func Find(manifest []byte) (string, error) {
+	if bundled.Enabled() {
+		return bundled.Path("ghostty-vt.dll")
+	}
 	// A portable Windows bundle always uses its adjacent library, even if an
 	// earlier installation left MYGO_GHOSTTY_VT in the environment.
 	if runtime.GOOS == "windows" {

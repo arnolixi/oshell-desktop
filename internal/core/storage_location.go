@@ -7,6 +7,7 @@ import (
 	"io"
 	"io/fs"
 	"os"
+	"oshell-desktop/internal/bundled"
 	"path/filepath"
 	"runtime"
 	"strings"
@@ -22,12 +23,19 @@ type StorageLocation struct {
 const PortableMarker = "oshell-portable"
 
 func portableStorageDirectory(goos, executable string) (string, bool, error) {
+	return portableStorageDirectoryWithMode(goos, executable, bundled.Enabled())
+}
+
+func portableStorageDirectoryWithMode(goos, executable string, singleFile bool) (string, bool, error) {
 	if goos != "windows" {
 		return "", false, nil
 	}
 	directory, err := filepath.Abs(filepath.Dir(executable))
 	if err != nil {
 		return "", false, err
+	}
+	if singleFile {
+		return directory, true, nil
 	}
 	info, err := os.Lstat(filepath.Join(directory, PortableMarker))
 	if os.IsNotExist(err) {
