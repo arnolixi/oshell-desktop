@@ -110,6 +110,11 @@ func describeSharedJSON(value json.RawMessage) string {
 	return string(out)
 }
 func sharedFields(d SharedDocument) (map[string]json.RawMessage, error) {
+	normalized, err := d.canonicalProtocol()
+	if err != nil {
+		return nil, err
+	}
+	d = normalized
 	data, e := json.Marshal(d)
 	if e != nil {
 		return nil, e

@@ -71,7 +71,7 @@ func (a *App) sharedSyncSettings(c *ui.Context) {
 	a.syncLocationSettings(c)
 	a.syncStatusCard(c)
 	ui.Text(c, "配置同步").Bold()
-	ui.Text(c, "会话、设置和保存的密码以主密码加密后同步。首次连接已有数据时，由你选择保留的版本。").Wrap()
+	ui.Text(c, "与 macOS OShell 共用加密配置协议。各节点使用相同主密码及同一同步目标；会话、代理、快捷引用、设置和保存的密码双向同步。首次接入请选择使用共享数据或合并本地会话。").Wrap()
 	ui.Checkbox(c, &f.options.Enabled, "启用配置同步")
 	selectValue(c, "同步方式", &f.options.Backend, [][2]string{{"webdav", "WebDAV"}, {"directory", "iCloud / 同步目录"}})
 	ui.Field(c, "目录地址", func() { ui.TextInput(c, &f.options.Address).Label("同步目录地址") })
@@ -117,7 +117,7 @@ func (a *App) sharedSyncSettings(c *ui.Context) {
 	if f.status != "" {
 		ui.Text(c, f.status).Wrap()
 	}
-	ui.Text(c, "目录同步的云端上传进度请在 Finder 中查看。").TextColor(c.Theme().TextMuted)
+	ui.Text(c, "WebDAV 共用 oshell-vault.json；同步目录共用 configuration.json。本机数据目录保持独立，不要同步本机密钥。云盘进度请在对应客户端查看。").TextColor(c.Theme().TextMuted)
 }
 func (a *App) saveSharedSyncSettings() { a.saveSharedSyncSettingsThen(nil) }
 

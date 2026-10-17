@@ -104,3 +104,7 @@ Linux CI 安装发行版的 `lrzsz` 执行相同的互通测试。本机 Linux �
 - `third_party/mygo`：固定框架源码，含运行时渲染后端切换补丁；保留上游结构、测试和许可证。
 
 许可见 [LICENSE](LICENSE) 和 [第三方声明](THIRD_PARTY_NOTICES.md)。
+
+## 与 macOS OShell 同步
+
+两端共用 `OShell.shared-vault` 加密协议，通过同一 WebDAV 目录或共享同步目录交换配置；本机数据目录保持独立。接入步骤、主密码要求与多节点冲突规则见 [共享配置协议](docs/shared-configuration.md)。

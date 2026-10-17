@@ -134,6 +134,11 @@ func (d SharedDocument) Validate(master []byte) error {
 	return cfg.Validate()
 }
 func (d SharedDocument) Encode(master []byte) ([]byte, error) {
+	normalized, err := d.canonicalProtocol()
+	if err != nil {
+		return nil, err
+	}
+	d = normalized
 	if e := d.Validate(master); e != nil {
 		return nil, e
 	}
@@ -222,7 +227,7 @@ func preferencesForShared(cfg Config) map[string]json.RawMessage {
 	put("fontName", font)
 	put("fontSize", s.FontSize)
 	put("scrollback", s.ScrollbackLines)
-	put("darkTheme", s.Dark)
+	put("darkTheme", sharedSchemeIsDark(s))
 	put("metal", s.Metal)
 	put("autoZmodem", s.AutoZmodem)
 	put("interfaceTheme", s.InterfaceTheme)
@@ -239,7 +244,7 @@ func preferencesForShared(cfg Config) map[string]json.RawMessage {
 	put("copyTrimTrailingWhitespace", s.Input.TrimTrailing)
 	put("confirmMultilinePaste", s.Input.ConfirmMultiline)
 	put("quickSendBarVisible", s.QuickSendVisible)
-	put("quickSendScope", s.QuickSendScope)
+	put("quickSendScope", sharedQuickSendScope(s.QuickSendScope))
 	if s.HighlightSetID == "" {
 		put("highlightSetID", nil)
 	} else {
@@ -256,7 +261,14 @@ func (d SharedDocument) Configuration() (Config, error) {
 			return cfg, e
 		}
 	}
-	values := map[string]any{"metal": &s.Metal, "masterWarningAcknowledged": &s.MasterWarningAcknowledged, "updateRepository": &s.UpdateRepository, "automaticUpdateChecks": &s.AutomaticUpdateChecks, "preferColorEmoji": &s.PreferColorEmoji, "ambiguousCharactersAreWide": &s.AmbiguousCharactersAreWide, "terminalClockEnabled": &s.TerminalClockEnabled, "terminalClockPosition": &s.TerminalClockPosition, "terminalClockFontName": &s.TerminalClockFontName, "terminalClockFontSize": &s.TerminalClockFontSize, "terminalClockColor": &s.TerminalClockColor, "terminalClockOpacity": &s.TerminalClockOpacity, "fontName": &s.FontFamily, "fontSize": &s.FontSize, "scrollback": &s.ScrollbackLines, "darkTheme": &s.Dark, "autoZmodem": &s.AutoZmodem, "interfaceTheme": &s.InterfaceTheme, "colorSchemeID": &s.ColorSchemeID, "customColorSchemes": &s.CustomSchemes, "keyboardShortcuts": &s.KeyboardShortcuts, "copyOnSelect": &s.Input.CopyOnSelect, "rightClickPaste": &s.Input.RightClickPaste, "copyTrimLeadingWhitespace": &s.Input.TrimLeading, "copyTrimTrailingWhitespace": &s.Input.TrimTrailing, "confirmMultilinePaste": &s.Input.ConfirmMultiline, "quickSendBarVisible": &s.QuickSendVisible, "quickSendScope": &s.QuickSendScope, "highlightSetID": &s.HighlightSetID}
+	values := map[string]any{"metal": &s.Metal, "masterWarningAcknowledged": &s.MasterWarningAcknowledged, "updateRepository": &s.UpdateRepository, "automaticUpdateChecks": &s.AutomaticUpdateChecks, "preferColorEmoji": &s.PreferColorEmoji, "ambiguousCharactersAreWide": &s.AmbiguousCharactersAreWide, "terminalClockEnabled": &s.TerminalClockEnabled, "terminalClockPosition": &s.TerminalClockPosition, "terminalClockFontName": &s.TerminalClockFontName, "terminalClockFontSize": &s.TerminalClockFontSize, "terminalClockColor": &s.TerminalClockColor, "terminalClockOpacity": &s.TerminalClockOpacity, "fontName": &s.FontFamily, "fontSize": &s.FontSize, "scrollback": &s.ScrollbackLines, "darkTheme": &s.Dark, "autoZmodem": &s.AutoZmodem, "interfaceTheme": &s.InterfaceTheme, "colorSchemeID": &s.ColorSchemeID, "customColorSchemes": &s.CustomSchemes, "keyboardShortcuts": &s.KeyboardShortcuts, "copyOnSelect": &s.Input.CopyOnSelect, "rightClickPaste": &s.Input.RightClickPaste, "copyTrimLeadingWhitespace": &s.Input.TrimLeading, "copyTrimTrailingWhitespace": &s.Input.TrimTrailing, "confirmMultilinePaste": &s.Input.ConfirmMultiline, "quickSendBarVisible": &s.QuickSendVisible, "highlightSetID": &s.HighlightSetID}
+	if raw, ok := d.Preferences["quickSendScope"]; ok {
+		scope, err := decodeSharedQuickSendScope(raw)
+		if err != nil {
+			return cfg, err
+		}
+		s.QuickSendScope = scope
+	}
 	for key, target := range values {
 		if raw, ok := d.Preferences[key]; ok {
 			if key == "highlightSetID" && string(raw) == "null" {
@@ -373,7 +385,7 @@ func sameRawIdentity(a, b Profile) bool {
 	return strings.EqualFold(a.ID, b.ID) && a.Host == b.Host && a.Port == b.Port && a.Username == b.Username && a.Kind == b.Kind
 }
 func (v *Vault) ExportSharedDocument(ctx context.Context, cfg Config, master []byte, cached *SharedDocument, oldDigests map[string]string) (SharedDocument, map[string]string, error) {
-	document := SharedDocument{Profiles: []PortableProfile{}, Preferences: preferencesForShared(cfg), Directories: []string{}, QuickCommands: append([]QuickCommand{}, cfg.QuickCommands...), HighlightSets: cfg.Clone().HighlightSets, Defaults: cfg.SessionDefaults, Links: SharedLinks{Entries: append([]SessionLink{}, cfg.Links...), Visible: cfg.Settings.LinksVisible, RootOrder: append([]string{}, cfg.LinkRootOrder...), Folders: []string{}}}
+	document := SharedDocument{Proxies: []PortableProxy{}, Profiles: []PortableProfile{}, Preferences: preferencesForShared(cfg), Directories: []string{}, QuickCommands: append([]QuickCommand{}, cfg.QuickCommands...), HighlightSets: cfg.Clone().HighlightSets, Defaults: cfg.SessionDefaults, Links: SharedLinks{Entries: append([]SessionLink{}, cfg.Links...), Visible: cfg.Settings.LinksVisible, RootOrder: append([]string{}, cfg.LinkRootOrder...), Folders: []string{}}}
 	snapshot, e := v.snapshotCredentials()
 	if e != nil {
 		return document, nil, e

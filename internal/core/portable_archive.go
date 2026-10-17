@@ -32,6 +32,10 @@ type PortableProfile struct {
 
 func (p PortableProfile) MarshalJSON() ([]byte, error) {
 	definition := p.Definition
+	definition.Tunnels = append([]TunnelRule{}, definition.Tunnels...)
+	if definition.Proxy.SSHAuthentication == "" {
+		definition.Proxy.SSHAuthentication = "automatic"
+	}
 	if definition.Proxy.ID == "" {
 		// Serialization must be deterministic for sync comparison. A missing
 		// disabled proxy ID is derived from the stable session ID, never randomized.

@@ -20,6 +20,7 @@ type SharedSyncEngine struct {
 	Replica   SharedReplicaStore
 }
 type SharedSyncPlan struct {
+	protocolUpgrade                  bool
 	runID                            string
 	started                          time.Time
 	originalLocal                    SharedDocument
@@ -35,8 +36,16 @@ type SharedSyncPlan struct {
 }
 
 func sameShared(a, b SharedDocument) bool {
-	x, _ := json.Marshal(a)
-	y, _ := json.Marshal(b)
+	left, err := a.canonicalProtocol()
+	if err != nil {
+		return false
+	}
+	right, err := b.canonicalProtocol()
+	if err != nil {
+		return false
+	}
+	x, _ := json.Marshal(left)
+	y, _ := json.Marshal(right)
 	return equalSharedJSON(x, y)
 }
 func (e *SharedSyncEngine) Prepare(ctx context.Context, cfg Config, master []byte, allowCreate bool) (_ *SharedSyncPlan, resultErr error) {
@@ -107,6 +116,7 @@ func (e *SharedSyncEngine) Prepare(ctx context.Context, cfg Config, master []byt
 	// envelope nonces do not mean that password protection itself changed.
 	remote.Verifier = local.Verifier
 	plan.Remote = remote
+	plan.protocolUpgrade = remote.needsProtocolUpgrade()
 	plan.HasRemote = true
 	plan.etag = object.ETag
 	if sameShared(local, remote) {
@@ -193,7 +203,7 @@ func (p *SharedSyncPlan) Commit(ctx context.Context, choices map[string]SharedMe
 		return p.configuration, fmt.Errorf("选择期间本机配置或密码库发生变化，请重新同步")
 	}
 
-	if p.HasRemote && sameShared(p.originalLocal, p.Remote) && sameShared(document, p.Remote) {
+	if p.HasRemote && !p.protocolUpgrade && sameShared(p.originalLocal, p.Remote) && sameShared(document, p.Remote) {
 		if p.baseline == nil || !sameShared(*p.baseline, document) {
 			replica := SharedReplica{Version: 1, Target: e.Replica.Target, Baseline: &document, CachedLocal: &p.Local, CredentialDigests: p.digests}
 			if err = e.Replica.Save(replica, master); err != nil {
@@ -227,7 +237,7 @@ func (p *SharedSyncPlan) Commit(ctx context.Context, choices map[string]SharedMe
 			return p.configuration, err
 		}
 	}
-	if !p.HasRemote || !sameShared(document, p.Remote) {
+	if !p.HasRemote || p.protocolUpgrade || !sameShared(document, p.Remote) {
 		e.recordDiagnostic(SyncUploading, started, nil, runID)
 		if err = e.Transport.Put(ctx, encrypted, p.etag); err != nil {
 			return p.configuration, err

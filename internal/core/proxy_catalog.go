@@ -176,6 +176,9 @@ type PortableProxy struct {
 }
 
 func (p PortableProxy) MarshalJSON() ([]byte, error) {
+	if p.Definition.Settings.SSHAuthentication == "" {
+		p.Definition.Settings.SSHAuthentication = "automatic"
+	}
 	data, e := json.Marshal(p.Definition)
 	if e != nil {
 		return nil, e
