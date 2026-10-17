@@ -10,6 +10,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"golang.org/x/crypto/pbkdf2"
+	"reflect"
 	"sort"
 	"strings"
 )
@@ -198,6 +199,7 @@ func decodeNativeDocument(plain []byte) (SharedDocument, error) {
 	for _, ftp := range legacy.FTPProfiles {
 		p := NewProfile()
 		p.ID = strings.ToUpper(ftp.ID)
+		p.Proxy.ID = absentProxyID(p.ID)
 		p.Name = ftp.Name
 		p.Kind = "ftp"
 		p.Host = ftp.Host
@@ -208,7 +210,9 @@ func decodeNativeDocument(plain []byte) (SharedDocument, error) {
 		duplicate := false
 		for _, existing := range d.Profiles {
 			if strings.EqualFold(existing.Definition.ID, p.ID) {
-				if existing.Definition.Host != p.Host || existing.Definition.Port != p.Port || existing.Definition.Username != p.Username || existing.Definition.Kind != "ftp" {
+				// Match Swift's FTPProfile equality: an ID collision must not
+				// silently discard a name, initial path or saved password.
+				if existing.Definition.Host != p.Host || existing.Definition.Port != p.Port || existing.Definition.Username != p.Username || existing.Definition.Kind != "ftp" || existing.Definition.Name != p.Name || existing.Definition.InitialDirectory != p.InitialDirectory || !reflect.DeepEqual(existing.Password, ftp.EncryptedPassword) {
 					return d, fmt.Errorf("旧 FTP 会话 ID 与现有会话冲突")
 				}
 				duplicate = true

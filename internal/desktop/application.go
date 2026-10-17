@@ -22,6 +22,7 @@ type applicationHub struct {
 	syncTimer             *time.Timer
 	clock                 workspaceClock
 	configBusy            bool
+	managerClipboard      *sessionConfigurationClipboard
 	settingsOwner         *App
 	store                 *core.Store
 	config                core.Config

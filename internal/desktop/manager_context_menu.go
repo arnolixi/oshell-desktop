@@ -28,8 +28,17 @@ func (a *App) selectManagerContext(id string) (sessionRow, bool) {
 	a.selected = ""
 	return sessionRow{}, false
 }
-func (a *App) managerContextMenu(m *ui.Menu, id string) {
+func (a *App) managerContextMenu(c *ui.Context, m *ui.Menu, id string) {
 	r, valid := a.selectManagerContext(id)
+	if valid && r.parent {
+		if m.Item("上一级").Chosen() {
+			a.enterRow(r)
+		}
+		return
+	}
+	if a.managerClipboardMenu(c, m) {
+		return
+	}
 	chosen := a.selectedManagerRows()
 	mutable := a.managerSelectionMutable()
 	count := a.managerConnectCount()
@@ -54,12 +63,6 @@ func (a *App) managerContextMenu(m *ui.Menu, id string) {
 		}
 		if m.Item(fmt.Sprintf("删除所选（%d）…", len(chosen))).Disabled(!mutable || a.passwordLocked()).Chosen() {
 			a.deleteManagerSelection()
-		}
-		return
-	}
-	if valid && r.parent {
-		if m.Item("上一级").Chosen() {
-			a.enterRow(r)
 		}
 		return
 	}

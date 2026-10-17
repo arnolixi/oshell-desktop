@@ -17,7 +17,7 @@ func TestLinksMenuCreatesActualProfilesForEveryProtocol(t *testing.T) {
 			a := newApp(store, cfg)
 			a.managerGroup = "Links"
 			tt := ui.NewTester(func(c *ui.Context) {
-				ui.Box(c).Fill().Label("blank").ContextMenu(func(m *ui.Menu) { a.managerContextMenu(m, "") })
+				ui.Box(c).Fill().Label("blank").ContextMenu(func(m *ui.Menu) { a.managerContextMenu(c, m, "") })
 			}, 700, 400)
 			if err := tt.RightClick("blank"); err != nil {
 				t.Fatal(err)

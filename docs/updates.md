@@ -1,3 +1,8 @@
+# Windows / Linux
+
+Windows 单文件便携版和 Linux 运行包已改用 GitHub Release 更新，安装及回滚流程见 [updates-portable.md](updates-portable.md)。下文保留原 macOS 签名更新协议说明，不代表 Windows / Linux 的实现。
+
+
 # OShell Desktop signed updates
 
 Development status: metadata checks and verified streaming download are implemented.

@@ -58,7 +58,18 @@ func (a *App) duplicateManagerSelection() {
 		return
 	}
 	ids := a.selectedProfileIDs()
-	if len(ids) == 0 {
+	var sources []core.Profile
+	for _, p := range a.config.Clone().Profiles {
+		if ids[p.ID] {
+			sources = append(sources, p)
+		}
+	}
+	a.copyManagerProfiles(sources, nil, nil)
+}
+
+// A nil destination retains the existing duplicate-in-place behavior.
+func (a *App) copyManagerProfiles(originals []core.Profile, destination *string, completed func()) {
+	if len(originals) == 0 || a.passwordLocked() || a.configurationBusy() || a.vault == nil {
 		return
 	}
 	revision, err := a.store.Revision()
@@ -68,7 +79,6 @@ func (a *App) duplicateManagerSelection() {
 	}
 	vault := a.vault
 	vaultRevision := vault.Revision()
-	originals := append([]core.Profile(nil), a.config.Profiles...)
 	candidate := a.config.Clone()
 	a.setConfigurationBusy(true)
 	go func() {
@@ -88,10 +98,20 @@ func (a *App) duplicateManagerSelection() {
 			return err
 		}
 		for _, source := range originals {
-			if !ids[source.ID] {
-				continue
+			target := source
+			if destination != nil {
+				target.Group = *destination
 			}
-			duplicate := core.DuplicateProfile(source, candidate.Profiles)
+			duplicate := core.DuplicateProfile(target, candidate.Profiles)
+			if destination != nil {
+				collision := false
+				for _, existing := range candidate.Profiles {
+					collision = collision || existing.Group == target.Group && existing.Name == target.Name
+				}
+				if !collision {
+					duplicate.Name = target.Name
+				}
+			}
 			if err = copyCredential(source, duplicate); err != nil {
 				break
 			}
@@ -124,7 +144,10 @@ func (a *App) duplicateManagerSelection() {
 				a.hub.scheduleSharedSync(2 * time.Second)
 			}
 			a.query = ""
-			if len(copied) == 1 {
+			if destination != nil {
+				a.managerGroup, a.managerAll = *destination, false
+				a.managerProtocol, a.managerLastProtocol = "", ""
+			} else if len(copied) == 1 {
 				for _, profile := range candidate.Profiles {
 					if copied[profile.ID] {
 						a.managerGroup = profile.Group
@@ -147,6 +170,12 @@ func (a *App) duplicateManagerSelection() {
 				}
 			}
 			a.status = fmt.Sprintf("已复制 %d 个会话", len(copied))
+			if destination != nil {
+				a.status = fmt.Sprintf("已粘贴 %d 个会话配置", len(copied))
+			}
+			if completed != nil {
+				completed()
+			}
 			if a.manager != nil {
 				a.manager.Invalidate()
 			}

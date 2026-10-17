@@ -91,6 +91,7 @@ type App struct {
 	managerParentClick                              bool
 	managerRow                                      int
 	managerRename                                   *managerRenameState
+	managerClipboard                                *sessionConfigurationClipboard
 	authPasswordRevealed                            bool
 	managerList                                     *ui.ListState
 	history                                         []string

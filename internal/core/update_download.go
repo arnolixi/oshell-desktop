@@ -23,6 +23,10 @@ func (d *VerifiedDownload) ArchivePath() string { return d.path }
 func (d *VerifiedDownload) Remove() error       { return os.Remove(d.path) }
 func updateDownloadClient() *http.Client {
 	return &http.Client{Timeout: 15 * time.Minute, CheckRedirect: func(request *http.Request, via []*http.Request) error {
+		// Never forward a private-repository token to signed asset URLs.
+		if request.URL.Host != "api.github.com" {
+			request.Header.Del("Authorization")
+		}
 		if len(via) >= 8 || request.URL.Scheme != "https" || request.URL.User != nil {
 			return fmt.Errorf("更新下载重定向无效")
 		}

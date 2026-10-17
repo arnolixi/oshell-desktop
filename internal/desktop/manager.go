@@ -295,7 +295,7 @@ func (a *App) managerView(c *ui.Context) {
 
 				})
 				cell.HandleInput(func(ev ui.InputEvent) bool { return a.managerCellInput(r, ev) })
-				cell.ContextMenu(func(m *ui.Menu) { a.managerContextMenu(m, r.id) })
+				cell.ContextMenu(func(m *ui.Menu) { a.managerContextMenu(c, m, r.id) })
 				if !r.parent && !(r.folder && r.group == "Links") {
 					moving := []sessionRow{r}
 					for _, selected := range chosen {
@@ -312,7 +312,7 @@ func (a *App) managerView(c *ui.Context) {
 				return
 			}
 			if r.folder {
-				ui.Row(c).FillWidth().Height(32).HandleInput(func(ev ui.InputEvent) bool { return a.managerCellInput(r, ev) }).ContextMenu(func(m *ui.Menu) { a.managerContextMenu(m, r.id) }).Children(func() {
+				ui.Row(c).FillWidth().Height(32).HandleInput(func(ev ui.InputEvent) bool { return a.managerCellInput(r, ev) }).ContextMenu(func(m *ui.Menu) { a.managerContextMenu(c, m, r.id) }).Children(func() {
 					if col == 5 && !r.parent && len(query.Terms) > 0 {
 						ui.RichText(c, managerSearchSpans("/"+managerParent(r.group), query)...).SingleLine().Tooltip("/" + managerParent(r.group)).TextColor(textColor)
 					}
@@ -341,17 +341,18 @@ func (a *App) managerView(c *ui.Context) {
 			case 5:
 				s = "/" + r.group
 			}
-			ui.Row(c).FillWidth().Height(32).HandleInput(func(ev ui.InputEvent) bool { return a.managerCellInput(r, ev) }).ContextMenu(func(m *ui.Menu) { a.managerContextMenu(m, r.id) }).Children(func() {
+			ui.Row(c).FillWidth().Height(32).HandleInput(func(ev ui.InputEvent) bool { return a.managerCellInput(r, ev) }).ContextMenu(func(m *ui.Menu) { a.managerContextMenu(c, m, r.id) }).Children(func() {
 				ui.RichText(c, managerSearchSpans(s, query)...).SingleLine().Tooltip(s).TextColor(textColor)
 			})
 		}).Grow(1).MinHeight(0).BorderWidth(1).BorderColor(c.Theme().Border).Radius(4).Label("会话列表")
+		a.managerClipboardShortcuts(c, table)
 		if a.managerRename == nil && table.Shortcut(0, ui.KeyF2) && len(chosen) == 1 {
 			a.beginManagerRename(chosen[0])
 		}
 		if focusResults {
 			a.managerList.Focus(c)
 		}
-		table.ContextMenu(func(m *ui.Menu) { a.managerContextMenu(m, "") })
+		table.ContextMenu(func(m *ui.Menu) { a.managerContextMenu(c, m, "") })
 		if a.managerRow >= len(rows) {
 			a.managerRow = -1
 			a.managerSelection.Clear()
@@ -409,6 +410,9 @@ func (a *App) managerView(c *ui.Context) {
 			})
 			ui.Button(c, "删除").Disabled((!valid && a.managerSelection.Len() == 0) || !a.managerSelectionMutable()).OnClick(a.deleteManagerSelection)
 			ui.MenuButton(c, "更多", func(m *ui.Menu) {
+				if a.managerClipboardMenu(c, m) {
+					return
+				}
 				if m.Item("复制所选会话").Disabled(!valid).Chosen() {
 					a.duplicateManagerSelection()
 				}
@@ -440,8 +444,12 @@ func (a *App) managerView(c *ui.Context) {
 			}
 			ui.PrimaryButton(c, label).Disabled(count == 0 && label != "打开").OnClick(a.connectManagerSelection)
 		})
-		if strings.HasPrefix(a.status, "错误") || strings.Contains(a.status, "失败") {
-			ui.Text(c, a.status).TextColor(c.Theme().Danger).FontSize(11)
+		if strings.HasPrefix(a.status, "错误") || strings.Contains(a.status, "失败") || strings.HasPrefix(a.status, "已复制") || strings.HasPrefix(a.status, "已粘贴") {
+			color := c.Theme().TextMuted
+			if strings.HasPrefix(a.status, "错误") || strings.Contains(a.status, "失败") {
+				color = c.Theme().Danger
+			}
+			ui.Text(c, a.status).TextColor(color).FontSize(11)
 		}
 	})
 }
