@@ -37,6 +37,10 @@ func postPane(p *pane, fn func(*App)) bool {
 }
 
 func (a *App) configureTerminalTransfer(p *pane, opts *terminal.Options, enabled bool) {
+	a.configureTerminalTransferWithPicker(p, opts, enabled, chooseTransferPaths)
+}
+
+func (a *App) configureTerminalTransferWithPicker(p *pane, opts *terminal.Options, enabled bool, choose func(context.Context, *mygo.Window, bool) ([]string, error)) {
 	opts.AutomaticTransfers = enabled
 	opts.TransferHandler = func(ctx context.Context, upload bool, conn net.Conn) error {
 		window := make(chan *mygo.Window, 1)
@@ -52,7 +56,7 @@ func (a *App) configureTerminalTransfer(p *pane, opts *terminal.Options, enabled
 		case <-ctx.Done():
 			return ctx.Err()
 		}
-		paths, err := chooseTransferPaths(ctx, parent, upload)
+		paths, err := choose(ctx, parent, upload)
 		if err != nil {
 			return err
 		}

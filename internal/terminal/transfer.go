@@ -60,25 +60,23 @@ func (c *transferController) finishInput() {
 }
 func (c *transferController) feed(data []byte) { c.mu.Lock(); defer c.mu.Unlock(); c.process(data) }
 func (c *transferController) process(data []byte) {
-	if c.active != nil {
+	for c.active != nil {
 		session := c.active
 		select {
 		case <-session.done:
 			c.complete(session)
+			// Returned bytes can contain the next transfer's header. Route
+			// this input to that new session instead of the text detector.
+			continue
 		default:
 		}
-		if c.active == session {
-			n, ok := session.pipe.feed(data)
-			if ok {
-				return
-			}
-			<-session.done
-			c.complete(session)
-			if n < len(data) {
-				c.process(data[n:])
-			}
+		n, ok := session.pipe.feed(data)
+		if ok {
 			return
 		}
+		<-session.done
+		c.complete(session)
+		data = data[n:]
 	}
 	if !c.term.transferEnabled.Load() {
 		c.term.write(c.detector.flush())
@@ -132,11 +130,13 @@ func (c *transferController) complete(session *protocolSession) {
 	}
 	session.cancel()
 	c.term.in.pause(false)
-	if len(tail) > 0 && session.err == nil {
-		c.process(tail)
-	}
+	// Publish completion before a buffered header starts another handler;
+	// otherwise the old completion can overwrite the new transfer's UI state.
 	if c.term.opts.TransferFinished != nil {
 		c.term.opts.TransferFinished(session.err)
+	}
+	if len(tail) > 0 && session.err == nil {
+		c.process(tail)
 	}
 }
 

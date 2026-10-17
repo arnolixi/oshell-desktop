@@ -2,71 +2,18 @@ package zmodem
 
 import (
 	"bytes"
-	"context"
 	"fmt"
 	"io"
 	"net"
 	"os"
-	"os/exec"
+	"oshell-desktop/internal/zmodem/testutil"
 	"path/filepath"
-	"runtime"
 	"testing"
-	"time"
 )
 
 func lrzszPeer(t *testing.T, dir, name string, args ...string) (net.Conn, func()) {
 	t.Helper()
-	if runtime.GOOS == "windows" {
-		t.Skip("lrzsz fixture uses Unix stdio sockets")
-	}
-	executable, e := exec.LookPath(name)
-	if e != nil {
-		if os.Getenv("OSHELL_REQUIRE_LRZSZ") == "1" {
-			t.Fatal(e)
-		}
-		t.Skip("lrzsz not installed")
-	}
-	listener, e := net.Listen("tcp", "127.0.0.1:0")
-	if e != nil {
-		t.Fatal(e)
-	}
-	defer listener.Close()
-	local, e := net.Dial("tcp", listener.Addr().String())
-	if e != nil {
-		t.Fatal(e)
-	}
-	t.Cleanup(func() { local.Close() })
-	peer, e := listener.Accept()
-	if e != nil {
-		t.Fatal(e)
-	}
-	file, e := peer.(*net.TCPConn).File()
-	peer.Close()
-	if e != nil {
-		t.Fatal(e)
-	}
-	ctx, cancel := context.WithTimeout(context.Background(), 45*time.Second)
-	t.Cleanup(cancel)
-	cmd := exec.CommandContext(ctx, executable, args...)
-	cmd.Dir = dir
-	cmd.Stdin = file
-	cmd.Stdout = file
-	var stderr bytes.Buffer
-	cmd.Stderr = &stderr
-	if e = cmd.Start(); e != nil {
-		file.Close()
-		t.Fatal(e)
-	}
-	file.Close()
-	finished := make(chan error, 1)
-	go func() { finished <- cmd.Wait() }()
-	t.Cleanup(func() { cancel() })
-	return local, func() {
-		t.Helper()
-		if e := <-finished; e != nil {
-			t.Fatalf("%s: %v, %s", name, e, stderr.String())
-		}
-	}
+	return testutil.LrzszPeer(t, dir, name, args...)
 }
 func TestLrzszBatchInterop(t *testing.T) {
 	sizes := []int{0, 1, 6, 128, 4096, 65536, 12993548}
@@ -121,6 +68,30 @@ func TestLrzszBatchInterop(t *testing.T) {
 						t.Fatalf("download %s differs", name)
 					}
 				}
+			}
+		})
+	}
+}
+
+func TestLrzszDownloadModes(t *testing.T) {
+	for _, args := range [][]string{{"-b"}, {"-b", "-e"}, {"-b", "-o"}, {"-b", "-w", "512"}} {
+		t.Run(fmt.Sprint(args), func(t *testing.T) {
+			dir := t.TempDir()
+			want := make([]byte, 65539)
+			for i := range want {
+				want[i] = byte(i)
+			}
+			if err := os.WriteFile(filepath.Join(dir, "data.bin"), want, 0600); err != nil {
+				t.Fatal(err)
+			}
+			conn, wait := lrzszPeer(t, dir, "sz", append(args, "--", "data.bin")...)
+			got := &interopBuffer{}
+			if err := ReceiveFiles(conn, func(ReceiveFile) (io.WriteCloser, error) { return got, nil }, nil); err != nil {
+				t.Fatal(err)
+			}
+			wait()
+			if !bytes.Equal(want, got.Bytes()) {
+				t.Fatal("download differs")
 			}
 		})
 	}

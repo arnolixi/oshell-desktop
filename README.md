@@ -87,6 +87,9 @@ go vet ./...
 ```
 
 测试使用临时数据目录和本机模拟服务，不需要真实服务器凭据。
+Windows CI 另用固定版本及 SHA-256 的 [lrzsz Windows 便携工具](https://github.com/trzsz/lrzsz-win32/releases/tag/v0.12.21rc)
+验证真实 `rz` / `sz` 互通，覆盖终端自动识别、分片、CRC16 / CRC32、转义、中文文件名、批量传输、取消和下载落盘，以及同一会话连续上传后下载（含立即切换）。
+本机可将 `rz.exe` / `sz.exe` 及其 DLL 放入 PATH，再设置 `OSHELL_REQUIRE_LRZSZ=1` 运行测试；测试工具不会打入产品包。
 可设置 `OSHELL_TEST_ARTIFACTS=/absolute/path` 输出 UI 回归截图。
 `validation/report-20261009-221430.zip` 是本机保留的用户 Windows 实测报告，不随源码上传，非安装包。
 

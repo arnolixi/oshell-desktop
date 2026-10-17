@@ -110,3 +110,58 @@ func TestTransferMultiplexerCancellationRestoresInput(t *testing.T) {
 		t.Fatalf("input after cancel: %q", got)
 	}
 }
+
+// The reader may finish an upload while the transport already holds the next
+// download header. Force that handoff before delivering the download payload.
+func TestTransferMultiplexerCompletedSessionHandsOffBufferedHeader(t *testing.T) {
+	loadLib(t)
+	header := zmodem.BuildZhexHeader(zmodem.FrameZRQINIT, 0)
+	payload := []byte("next-transfer-payload")
+	want := append(append([]byte(nil), header...), payload...)
+	received := make(chan []byte, 1)
+	finishedBeforeNext := make(chan bool, 2)
+	var term *Terminal
+	var err error
+	term, err = New(Options{Conn: newPipe(), NoBlink: true, AutomaticTransfers: true,
+		TransferHandler: func(ctx context.Context, upload bool, conn net.Conn) error {
+			conn.SetReadDeadline(time.Now().Add(time.Second))
+			buf := make([]byte, len(want))
+			n, err := io.ReadFull(conn, buf)
+			received <- buf[:n]
+			return err
+		},
+		TransferFinished: func(error) { finishedBeforeNext <- term.transfers.active == nil },
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer term.Close()
+	c := term.transfers
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	previous := &protocolSession{ctx: ctx, cancel: cancel, done: make(chan struct{})}
+	previous.pipe = newProtocolPipe(ctx, previous.done, nil)
+	previous.pipe.ReturnBuffered(header)
+	previous.pipe.finish()
+	close(previous.done)
+	c.mu.Lock()
+	c.active = previous
+	term.in.pause(true)
+	c.mu.Unlock()
+	c.feed(payload)
+	if !<-finishedBeforeNext {
+		t.Error("previous completion callback ran after next transfer started")
+	}
+	select {
+	case got := <-received:
+		if !bytes.Equal(got, want) {
+			t.Fatalf("next transfer lost payload: got %q, want %q", got, want)
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("next transfer stalled")
+	}
+	<-finishedBeforeNext
+	if !term.Available() {
+		t.Fatal("input not restored after consecutive transfers")
+	}
+}

@@ -278,6 +278,7 @@ func (s *sender) matchNextHexFrame(cur byte) (frame byte, ok bool) {
 			continue
 		}
 		if f, _, decOk := DecodeHexHeader(buf, i+4); decOk {
+			s.hexSniff = nil
 			return f, true
 		}
 	}
@@ -322,6 +323,9 @@ func (s *sender) buildZfile() []byte {
 // On ZRPOS (receiver-requested retransmit) or ZNAK (bad header), the stream
 // rewinds and resends from the requested offset.
 func (s *sender) streamData(startOffset uint32) error {
+	if int64(startOffset) > s.size {
+		return fmt.Errorf("ZMODEM: resume offset %d exceeds file size %d", startOffset, s.size)
+	}
 	offset := startOffset
 	for int(offset) < int(s.size) {
 		burstStart := offset
@@ -368,16 +372,30 @@ func (s *sender) streamData(startOffset uint32) error {
 		// ZNAK when the ZDATA header itself was garbled. Waiting also keeps
 		// old receivers (Term 4.8 / NComm) in step — they NAK a premature
 		// ZEOF if the last subpacket isn't acknowledged first.
-		resp, err := s.awaitBurstResponse()
-		if err != nil {
-			return err
+		var resp burstResponse
+		for {
+			var err error
+			resp, err = s.awaitBurstResponse()
+			if err != nil {
+				return err
+			}
+			// A delayed ACK for an earlier burst cannot acknowledge this one.
+			if resp.frame != FrameZACK || resp.offset >= offset {
+				break
+			}
 		}
 		switch resp.frame {
 		case FrameZACK:
+			if resp.offset != offset {
+				return fmt.Errorf("ZMODEM: invalid acknowledgement offset %d (want %d)", resp.offset, offset)
+			}
 			if s.onProgress != nil {
 				s.onProgress(int64(offset), s.size)
 			}
 		case FrameZRPOS:
+			if int64(resp.offset) > s.size {
+				return fmt.Errorf("ZMODEM: resume offset %d exceeds file size %d", resp.offset, s.size)
+			}
 			// Receiver detected a CRC error and wants us to rewind. Flush
 			// any stale ZRPOS retries it may have already queued so the
 			// next awaitBurstResponse sees a fresh response to our retry.
@@ -700,24 +718,31 @@ func (s *sender) sendCurrentFile(finalizeOnSkip bool) error {
 		return err
 	}
 
-	// Stream ZDATA bursts from `offset` to end-of-file, pacing ACKs.
-	if err := s.streamData(offset); err != nil {
-		if errors.Is(err, ErrSkipped) {
-			if finalizeOnSkip {
+	for {
+		// The peer may reject ZEOF and request a final retransmission.
+		if err := s.streamData(offset); err != nil {
+			if errors.Is(err, ErrSkipped) && finalizeOnSkip {
 				s.gracefulClose()
 			}
 			return err
 		}
-		return err
+		if _, err := s.conn.Write(s.codec.header16(FrameZEOF, uint32(s.size))); err != nil {
+			return err
+		}
+		frame, count, err := s.awaitOneOfWithCount(FrameZRINIT, FrameZRPOS, FrameZSKIP, FrameZABORT, FrameZFERR)
+		if err != nil {
+			return err
+		}
+		switch frame {
+		case FrameZRINIT:
+			return nil
+		case FrameZRPOS:
+			offset = count
+		default:
+			if finalizeOnSkip {
+				s.gracefulClose()
+			}
+			return ErrSkipped
+		}
 	}
-
-	// ZEOF + wait for ZRINIT confirmation.
-	if _, err := s.conn.Write(s.codec.header16(FrameZEOF, uint32(int(s.size)))); err != nil {
-		return err
-	}
-	if err := s.waitForZrinit(); err != nil {
-		return err
-	}
-
-	return nil
 }

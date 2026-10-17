@@ -83,10 +83,7 @@ func ReceiveFiles(conn net.Conn, open func(ReceiveFile) (io.WriteCloser, error),
 				return e
 			}
 		case FrameZSINIT:
-			if _, _, e = r.readSubpacket(); e != nil {
-				return e
-			}
-			if _, e = conn.Write(r.buildHeader(FrameZACK, 0)); e != nil {
+			if e = r.receiveSenderInit(); e != nil {
 				return e
 			}
 		case FrameZFILE:

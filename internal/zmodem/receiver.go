@@ -42,11 +42,8 @@ type ReceiveStatus struct {
 // duration: reads and writes go through it until Receive returns. The caller
 // should restore any pre-attached read handlers afterwards.
 //
-// CRC handling: we don't set CanFC32 in our ZRINIT, but several vintage
-// senders (xprzmodem.library on Amiga, etc.) latch into ZBIN32/CRC32 mode
-// anyway as soon as we advertise a non-zero bufsize. The receiver therefore
-// decodes both ZBIN (CRC16) and ZBIN32 (CRC32) headers and reciprocates with
-// matching ZACK/ZRPOS frames. ZHEX headers stay CRC16 in both directions.
+// CRC handling follows each incoming header: ZBIN/ZHEX use CRC16 and
+// ZBIN32 uses CRC32 for the subpackets that follow that header.
 func Receive(conn net.Conn, cfg ReceiveConfig) (ReceiveResult, error) {
 
 	r := &receiver{conn: conn, reader: newReader(conn), cfg: cfg}
@@ -65,7 +62,6 @@ func Receive(conn net.Conn, cfg ReceiveConfig) (ReceiveResult, error) {
 }
 
 type receiver struct {
-	codec    codec
 	writer   io.Writer
 	received int
 
@@ -77,24 +73,18 @@ type receiver struct {
 	filename  string
 	totalSize int
 
-	// crc32Mode latches once the sender emits its first ZBIN32 header.
-	// From then on every subsequent subpacket carries a 4-byte CRC32
-	// (little-endian) instead of a 2-byte CRC16, and our outgoing
-	// ZACK/ZRPOS frames switch to ZBIN32 too — many vintage senders
-	// only accept reciprocated CRC types in mid-transfer responses.
-	crc32Mode bool
+	crc32Mode  bool
+	hexTrailer bool // A hex header's CR/LF/XON precedes any following subpacket.
 
 	startedAt time.Time
 }
 
-// buildHeader emits an outbound binary header in whichever CRC flavor the
-// sender is currently using. ZHEX is unchanged (it's CRC16 always) and
-// stays at the BuildZhexHeader call sites.
+// Receiver replies use ZHEX, as lrzsz does. After a repeated ZRINIT, sz
+// consumes one padding '*' while resynchronizing before reading the next
+// header. A single-pad binary ZRPOS is then lost and the transfer stalls.
+// ASCII hex replies also remain safe when the sender requests ESCCTL.
 func (r *receiver) buildHeader(frame byte, count uint32) []byte {
-	if r.crc32Mode {
-		return r.codec.header32(frame, count)
-	}
-	return r.codec.header16(frame, count)
+	return BuildZhexHeader(frame, count)
 }
 
 // ---------- Top-level state machine ----------
@@ -102,9 +92,7 @@ func (r *receiver) buildHeader(frame byte, count uint32) []byte {
 func (r *receiver) run() (ReceiveResult, error) {
 	r.startedAt = nowFn()
 
-	// Send ZRINIT to nudge the sender into emitting ZFILE. CanFDX |
-	// CanOVIO advertise full duplex + overlapped IO; CanFC32 stays
-	// CLEARED so the sender uses CRC16 (which is all we decode).
+	// Advertise our receive window and CRC32 capability.
 	if err := r.sendZRINIT(); err != nil {
 		return ReceiveResult{}, err
 	}
@@ -158,7 +146,7 @@ func (r *receiver) run() (ReceiveResult, error) {
 	}, nil
 }
 
-// zrinitBufsize is the receive-window size advertised in ZRINIT (ZP2/ZP3).
+// zrinitBufsize is the receive-window size advertised in ZRINIT (ZP0/ZP1).
 // Senders stream subpackets with ZCRCG (no ACK) until they've sent this many
 // bytes, then switch to ZCRCW (ACK required). Setting this matters because
 // some vintage receivers treat 0 as "I can buffer almost nothing — ACK every
@@ -174,13 +162,8 @@ func (r *receiver) sendZRINIT() error {
 	// header from the receive side can be ZBIN since the sender's reply
 	// scanners accept either, but ZRINIT is special.
 	//
-	// Layout: ZP0=ZF0 capability flags, ZP1=ZF1 (unused), ZP2=bufsize lo,
-	// ZP3=bufsize hi.
-	//
-	// CanFC32 is set because we actually decode CRC32 headers and
-	// subpackets — being explicit beats letting old senders infer it
-	// from a byte they happened to misparse out of our bufsize bytes.
-	flags := uint32(CanFDX|CanOVIO|CanFC32) | (uint32(zrinitBufsize) << 16)
+	// Buffer size occupies ZP0/ZP1; capability flags occupy ZF0 (= ZP3).
+	flags := uint32(zrinitBufsize) | (uint32(CanFDX|CanOVIO|CanFC32) << 24)
 	header := BuildZhexHeader(FrameZRINIT, flags)
 	_, err := r.conn.Write(header)
 	return err
@@ -201,6 +184,10 @@ func (r *receiver) waitForZFile() error {
 			if err := r.sendZRINIT(); err != nil {
 				return err
 			}
+		case FrameZSINIT:
+			if err := r.receiveSenderInit(); err != nil {
+				return err
+			}
 		case FrameZFIN, FrameZABORT, FrameZFERR:
 			return fmt.Errorf("ZMODEM: sender aborted before ZFILE (frame %d)", frame)
 		default:
@@ -208,6 +195,15 @@ func (r *receiver) waitForZFile() error {
 			// duplicate ZSINIT) — ignore and keep waiting.
 		}
 	}
+}
+
+func (r *receiver) receiveSenderInit() error {
+	// ZHEX replies already satisfy the sender's ESCCTL request.
+	if _, _, err := r.readSubpacket(); err != nil {
+		return err
+	}
+	_, err := r.conn.Write(r.buildHeader(FrameZACK, 0))
+	return err
 }
 
 // readZFileSubpacket reads the info subpacket that follows a ZFILE header.
@@ -311,16 +307,15 @@ func (r *receiver) readDataBurst() (done bool, err error) {
 	for {
 		data, kind, err := r.readSubpacket()
 		if err != nil {
-			if err == errSubpacketTooLarge {
+			if !errors.Is(err, errSubpacketCRC) {
 				return false, err
 			}
 			// Request retransmit at our current offset.
 			if _, werr := r.conn.Write(r.buildHeader(FrameZRPOS, uint32(r.received))); werr != nil {
 				return false, werr
 			}
-			// Drain any leftover sender bytes from the bad burst so the
-			// next header read starts clean. Best effort.
-			r.reader.drain()
+			// The header scanner skips the rest of the damaged burst. Do not
+			// drain here: the peer may already have sent the requested retry.
 			return false, nil
 		}
 		if r.writer != nil {
@@ -410,10 +405,7 @@ func (r *receiver) readOOBestEffort() {
 // readHeader reads bytes until a complete ZHEX or ZBIN header arrives.
 // Returns the frame type and the 4-byte payload (offset/flags).
 //
-// We only emit ZBIN (CRC16) headers ourselves and we advertised CRC16-only
-// to the sender, so we never expect ZBIN32 in normal operation. If one
-// arrives we ignore it and keep scanning — better than hard-failing on a
-// non-conforming peer.
+// Each valid header determines the CRC width of its following subpackets.
 func (r *receiver) readHeader() (byte, uint32, error) {
 	for {
 		b, err := r.reader.readByte(receiveTimeout)
@@ -452,6 +444,8 @@ func (r *receiver) readHeader() (byte, uint32, error) {
 			if !ok {
 				continue
 			}
+			r.crc32Mode = false
+			r.hexTrailer = true
 			return frame, count, nil
 		case b2 == ZDLE:
 			b3, err := r.reader.readByte(receiveTimeout)
@@ -467,6 +461,8 @@ func (r *receiver) readHeader() (byte, uint32, error) {
 				if !ok {
 					continue
 				}
+				r.crc32Mode = false
+				r.hexTrailer = false
 				return frame, count, nil
 			case ZBIN32:
 				frame, count, ok, err := r.readBin32Body()
@@ -476,11 +472,8 @@ func (r *receiver) readHeader() (byte, uint32, error) {
 				if !ok {
 					continue
 				}
-				// Some vintage senders (Amiga xprzmodem and similar) latch
-				// onto CRC32 the moment they think the receiver advertised
-				// any meaningful buffer size. From this point on, all data
-				// subpackets and our reciprocated responses are CRC32.
 				r.crc32Mode = true
+				r.hexTrailer = false
 				return frame, count, nil
 			default:
 				continue
@@ -624,8 +617,26 @@ func unescapeByte(b byte) byte {
 // CRC bytes — the outer code requests retransmit and lets readHeader's
 // junk-skipping logic resync on the next header.
 var errSubpacketTooLarge = fmt.Errorf("ZMODEM: subpacket exceeds 1 MiB")
+var errSubpacketCRC = errors.New("ZMODEM: subpacket CRC mismatch")
 
 func (r *receiver) readSubpacket() ([]byte, byte, error) {
+	// lrzsz -e sends ZSINIT as ZHEX followed by an attention string.
+	// Header scanning normally skips the trailer, but a data reader must
+	// consume it explicitly without including it in the payload or CRC.
+	if r.hexTrailer {
+		r.hexTrailer = false
+		for i := 0; i < 3; i++ {
+			b, err := r.reader.readByte(receiveTimeout)
+			if err != nil {
+				return nil, 0, err
+			}
+			if (i == 0 && b == '\r') || (i == 1 && (b == '\n' || b == 0x8a)) || (i == 2 && b == XON) {
+				continue
+			}
+			r.reader.unread([]byte{b})
+			break
+		}
+	}
 	data := make([]byte, 0, subpacketSize)
 	for {
 		if len(data) > 1<<20 {
@@ -656,7 +667,7 @@ func (r *receiver) readSubpacket() ([]byte, byte, error) {
 				expected := uint32(crcBytes[0]) | uint32(crcBytes[1])<<8 |
 					uint32(crcBytes[2])<<16 | uint32(crcBytes[3])<<24
 				if CRC32(crcInput) != expected {
-					return nil, b2, fmt.Errorf("ZMODEM: subpacket CRC32 mismatch")
+					return nil, b2, fmt.Errorf("%w (CRC32)", errSubpacketCRC)
 				}
 			} else {
 				crcBytes, err := r.readEscapedBytes(2)
@@ -665,7 +676,7 @@ func (r *receiver) readSubpacket() ([]byte, byte, error) {
 				}
 				expected := uint16(crcBytes[0])<<8 | uint16(crcBytes[1])
 				if CRC16(crcInput) != expected {
-					return nil, b2, fmt.Errorf("ZMODEM: subpacket CRC mismatch")
+					return nil, b2, errSubpacketCRC
 				}
 			}
 			return data, b2, nil

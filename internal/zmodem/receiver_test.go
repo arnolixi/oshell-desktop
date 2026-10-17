@@ -16,6 +16,7 @@ func TestSendReceiveLoopback(t *testing.T) {
 		name string
 		data []byte
 	}{
+		{"empty", nil},
 		{"small text", []byte("Hello, ZMODEM receiver!\nLine two.\n")},
 		{"single subpacket boundary", bytes.Repeat([]byte{0xa5}, subpacketSize)},
 		{"two subpackets", bytes.Repeat([]byte{0x5a}, subpacketSize+128)},
