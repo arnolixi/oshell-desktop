@@ -40,7 +40,9 @@ jobs:
           sudo apt-get install -y --no-install-recommends libwebkit2gtk-4.1-0 xvfb xauth dbus-x11 libgl1-mesa-dri libglx-mesa0 libegl-mesa0 fonts-dejavu-core fonts-noto-cjk lrzsz
           echo 'OSHELL_REQUIRE_LRZSZ=1' >> "$GITHUB_ENV"
       - name: Core, PTY and ZMODEM race checks
-        run: go test -race ./internal/core ./internal/terminal/internal/pty ./internal/zmodem
+        # Production-strength key derivation exceeds Go's default 10m timeout under -race.
+        timeout-minutes: 35
+        run: go test -race -count=1 -timeout=30m ./internal/core ./internal/terminal/internal/pty ./internal/zmodem
       - name: Full regression suite
         if: runner.os == 'Windows'
         run: go test -count=1 -timeout=180s ./...
