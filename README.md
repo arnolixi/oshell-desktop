@@ -108,3 +108,5 @@ Linux CI 安装发行版的 `lrzsz` 执行相同的互通测试。本机 Linux �
 ## 与 macOS OShell 同步
 
 两端共用 `OShell.shared-vault` 加密协议，通过同一 WebDAV 目录或共享同步目录交换配置；本机数据目录保持独立。接入步骤、主密码要求与多节点冲突规则见 [共享配置协议](docs/shared-configuration.md)。
+
+开发规范：[共享配置协议 v2](docs/configuration-protocol-v2.md)（单一维护源；字段、加密、版本演进与互通验收）。

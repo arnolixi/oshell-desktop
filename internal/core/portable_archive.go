@@ -39,10 +39,7 @@ func (p PortableProfile) MarshalJSON() ([]byte, error) {
 	if definition.Proxy.ID == "" {
 		// Serialization must be deterministic for sync comparison. A missing
 		// disabled proxy ID is derived from the stable session ID, never randomized.
-		sum := sha256.Sum256([]byte("OShell absent proxy v1\n" + strings.ToUpper(definition.ID)))
-		sum[6] = (sum[6] & 15) | 0x50
-		sum[8] = (sum[8] & 63) | 0x80
-		definition.Proxy.ID = fmt.Sprintf("%x-%x-%x-%x-%x", sum[:4], sum[4:6], sum[6:8], sum[8:10], sum[10:16])
+		definition.Proxy.ID = absentProxyID(definition.ID)
 	}
 	data, e := json.Marshal(definition)
 	if e != nil {
@@ -225,7 +222,11 @@ func DecodePortableArchive(data []byte) (PortableArchive, error) {
 			return result, fmt.Errorf("归档缺少必需字段 %s", key)
 		}
 	}
-	if e := json.Unmarshal(data, &result); e != nil {
+	canonical, err := canonicalSharedJSON(data, "archive")
+	if err != nil {
+		return result, err
+	}
+	if e := json.Unmarshal(canonical, &result); e != nil {
 		return result, e
 	}
 	return result, result.Validate()
@@ -253,6 +254,9 @@ func (a PortableArchive) Encode() ([]byte, error) {
 		a.Directories = []string{}
 	}
 	data, e := json.MarshalIndent(a, "", "  ")
+	if e == nil {
+		data, e = canonicalSharedJSON(data, "archive")
+	}
 	if e == nil && len(data) > MaxArchive {
 		e = fmt.Errorf("会话文件超过 16 MiB")
 	}
@@ -486,4 +490,11 @@ func (v *Vault) exportCredential(p Profile) (string, SSHIdentity, error) {
 		identity = *entry.Resolved
 	}
 	return string(plain), identity, nil
+}
+
+func absentProxyID(id string) string {
+	sum := sha256.Sum256([]byte("OShell absent proxy v1\n" + strings.ToUpper(id)))
+	sum[6] = (sum[6] & 15) | 0x50
+	sum[8] = (sum[8] & 63) | 0x80
+	return fmt.Sprintf("%x-%x-%x-%x-%x", sum[:4], sum[4:6], sum[6:8], sum[8:10], sum[10:16])
 }

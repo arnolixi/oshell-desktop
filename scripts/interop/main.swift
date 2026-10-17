@@ -18,7 +18,25 @@ func validate(_ cfg: Configuration) throws {
   try checked(try SessionCipher.decrypt(p.encryptedPassword!,master:master,profile:p) == "fixture-"+p.kind.rawValue, "password round trip")
  }
 }
-if args[1] == "create" {
+if args[1] == "contract" {
+ try SharedConfigurationProtocol.contractData.write(to:URL(fileURLWithPath:args[2]))
+} else if args[1] == "archive-roundtrip" {
+ do {
+  let archive = try SessionArchive.decode(Data(contentsOf:URL(fileURLWithPath:args[2])))
+  try archive.encoded().write(to:URL(fileURLWithPath:args[3]))
+ } catch {fputs("Session archive rejected input\n",stderr);exit(2)}
+} else if args[1] == "canonical-json" || args[1] == "model-json" {
+ do {
+  let input = try Data(contentsOf:URL(fileURLWithPath:args[2]))
+  let normalized = try SharedConfigurationProtocol.canonicalData(input)
+  let output: Data
+  if args[1] == "model-json" {
+   let config = try JSONDecoder().decode(Configuration.self,from:normalized)
+   output = try SharedConfigurationProtocol.canonicalData(JSONEncoder().encode(config))
+  } else {output=normalized}
+  try output.write(to:URL(fileURLWithPath:args[3]))
+ } catch {fputs("Shared protocol rejected input\n",stderr);exit(2)}
+} else if args[1] == "create" {
  var profiles: [SessionProfile] = []
  for kind in [SessionKind.ssh,.sftp,.ftp] {
   var p = SessionProfile(name: "跨端-"+kind.rawValue,group:"共享/生产",kind:kind,host:"fixture.invalid",port:kind == .ftp ? 21:22,username:"fixture")

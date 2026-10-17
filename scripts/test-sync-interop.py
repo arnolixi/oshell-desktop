@@ -17,6 +17,7 @@ def main():
     args = parser.parse_args()
     if platform.system() != 'Darwin':
         parser.error('The native Swift core requires macOS; Go fixture tests run on all platforms.')
+    subprocess.run(['python3',str(ROOT/'scripts/sync-configuration-contract.py'),'--native-source',str(args.native_source),'--check'],check=True)
     sources = sorted((args.native_source / 'Sources/OShellCore').glob('*.swift'))
     if not sources:
         parser.error('Provide the macOS OShell source checkout using --native-source.')

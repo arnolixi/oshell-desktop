@@ -147,7 +147,7 @@ func (a *App) applyAppearance() {
 			if p.term != nil {
 				theme := terminalTheme(a.config.Settings.Scheme())
 				p.term.SetTheme(theme, nil)
-				p.term.SetFont(terminal.Font{Family: terminalFamily(a.config.Settings.FontFamily), Size: a.config.Settings.FontSize})
+				p.term.SetFont(terminal.Font{Family: terminalFamily(a.config.Settings.FontFamily), Size: float32(a.config.Settings.FontSize)})
 				a.applyTerminalPreferences(p)
 			}
 		})

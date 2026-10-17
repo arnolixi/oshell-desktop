@@ -208,7 +208,7 @@ type Settings struct {
 	ScrollbackLines            int               `json:"scrollbackLines"`
 	FontFamily                 string            `json:"fontFamily,omitempty"`
 	Dark                       bool              `json:"dark"`
-	FontSize                   float32           `json:"fontSize"`
+	FontSize                   float64           `json:"fontSize"`
 	ScrollbackMB               int               `json:"scrollbackMB"`
 }
 type Config struct {

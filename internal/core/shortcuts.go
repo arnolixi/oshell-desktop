@@ -76,7 +76,7 @@ func (s KeyboardShortcut) Display(platform string) string {
 	}
 	return strings.Join(append(parts, ShortcutKeyNames[s.KeyCode]), "+")
 }
-func (k KeyboardShortcuts) Bindings(action, platform string) []KeyboardShortcut {
+func (k KeyboardShortcuts) rawBindings(action, platform string) []KeyboardShortcut {
 	if value, ok := k.Overrides[action]; ok {
 		if value.Shortcut == nil {
 			return nil
@@ -133,7 +133,7 @@ func (k KeyboardShortcuts) Conflict(key KeyboardShortcut, except, platform strin
 		if a.ID == except {
 			continue
 		}
-		for _, other := range k.Bindings(a.ID, platform) {
+		for _, other := range k.rawBindings(a.ID, platform) {
 			if normalizedShortcut(other, platform) == key {
 				return a.Title
 			}
@@ -145,7 +145,7 @@ func (k KeyboardShortcuts) Validate(platform string) error {
 	known := map[string]bool{}
 	for _, a := range ShortcutActions {
 		known[a.ID] = true
-		for _, s := range k.Bindings(a.ID, platform) {
+		for _, s := range k.rawBindings(a.ID, platform) {
 			if !s.ValidFor(a.ID, platform) {
 				return fmt.Errorf("%s 的快捷键无效", a.Title)
 			}
@@ -174,4 +174,50 @@ func (k KeyboardShortcuts) Clone() KeyboardShortcuts {
 		out.Overrides[id] = v
 	}
 	return out
+}
+
+// Stored shared bindings are platform-independent. Platform collisions may
+// prevent execution but must never prevent reading or syncing the configuration.
+func (k KeyboardShortcuts) ValidateStored() error {
+	data, err := json.Marshal(k)
+	if err != nil {
+		return err
+	}
+	var value any
+	decoder := json.NewDecoder(strings.NewReader(string(data)))
+	decoder.UseNumber()
+	if err = decoder.Decode(&value); err != nil {
+		return err
+	}
+	_, err = canonicalSharedValue(value, sharedField{Type: "object", Ref: "shortcuts"}, "configuration.preferences.keyboardShortcuts")
+	return err
+}
+func (k KeyboardShortcuts) Bindings(action, platform string) []KeyboardShortcut {
+	raw := k.rawBindings(action, platform)
+	if len(k.Overrides) == 0 {
+		return raw
+	}
+	var bindings []KeyboardShortcut
+	_, custom := k.Overrides[action]
+	for _, key := range raw {
+		if !key.ValidFor(action, platform) {
+			continue
+		}
+		conflict := false
+		if custom {
+			conflict = k.Conflict(key, action, platform) != ""
+		} else {
+			normalized := normalizedShortcut(key, platform)
+			for other, override := range k.Overrides {
+				if other != action && override.Shortcut != nil && normalizedShortcut(*override.Shortcut, platform) == normalized {
+					conflict = true
+					break
+				}
+			}
+		}
+		if !conflict {
+			bindings = append(bindings, key)
+		}
+	}
+	return bindings
 }

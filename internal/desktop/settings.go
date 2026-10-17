@@ -238,7 +238,7 @@ func (a *App) settingsView(c *ui.Context) {
 					a.historySettings(c)
 				}).Gap(10)
 				ui.Box(c).Padding(12).Background(c.Theme().Surface).Radius(4).Children(func() {
-					ui.Text(c, "Aa 0123456789  中文预览\n❯ ~/workspace   main  ✓").Font(terminalFamily(s.FontFamily)).FontSize(s.FontSize)
+					ui.Text(c, "Aa 0123456789  中文预览\n❯ ~/workspace   main  ✓").Font(terminalFamily(s.FontFamily)).FontSize(float32(s.FontSize))
 				})
 				ui.Checkbox(c, &s.Metal, "使用 GPU 加速绘制终端（Metal）")
 				ui.Checkbox(c, &s.PreferColorEmoji, "优先显示彩色 Emoji")

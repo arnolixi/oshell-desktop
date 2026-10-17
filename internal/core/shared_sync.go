@@ -110,13 +110,18 @@ func (e *SharedSyncEngine) Prepare(ctx context.Context, cfg Config, master []byt
 	}
 	remote, err := DecodeSharedDocument(object.Data, master)
 	if err != nil {
+		if errors.Is(err, ErrSharedProtocol) {
+			return nil, err
+		}
 		return nil, safeSyncFailure("encryption")
 	}
 	// Both verifiers were authenticated with the same shared password. Random
 	// envelope nonces do not mean that password protection itself changed.
 	remote.Verifier = local.Verifier
 	plan.Remote = remote
-	plan.protocolUpgrade = remote.needsProtocolUpgrade()
+	var header struct{ Version int }
+	json.Unmarshal(object.Data, &header)
+	plan.protocolUpgrade = remote.needsProtocolUpgrade() || header.Version != 2
 	plan.HasRemote = true
 	plan.etag = object.ETag
 	if sameShared(local, remote) {

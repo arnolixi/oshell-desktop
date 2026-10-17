@@ -4,7 +4,6 @@ package core
 import (
 	"encoding/json"
 	"fmt"
-	"runtime"
 	"slices"
 	"sort"
 	"strings"
@@ -15,7 +14,7 @@ func (c Config) Validate() error {
 	if e := ValidateProxyCatalog(c.Proxies, c.Profiles); e != nil {
 		return e
 	}
-	if e := c.Settings.KeyboardShortcuts.Validate(runtime.GOOS); e != nil {
+	if e := c.Settings.KeyboardShortcuts.ValidateStored(); e != nil {
 		return e
 	}
 	if len(c.Profiles) > 2000 || len(c.Directories) > 4000 || len(c.Links) > 4000 || len(c.QuickCommands) > 1000 {

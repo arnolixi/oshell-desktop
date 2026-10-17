@@ -1,8 +1,11 @@
 package core
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
+	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -357,5 +360,223 @@ func TestSwiftReadsNewDesktopDocumentWithoutSpuriousChanges(t *testing.T) {
 	secret, err := DecryptMacPassword(*back.Profiles[0].Password, master, back.Profiles[0].Definition)
 	if err != nil || secret != "fixture-secret" {
 		t.Fatal("Go-origin credential lost", err)
+	}
+}
+
+func TestSwiftAllSharedFieldsAndUnknownRejection(t *testing.T) {
+	helper := os.Getenv("OSHELL_SWIFT_INTEROP_HELPER")
+	if helper == "" {
+		t.Skip("Swift helper required")
+	}
+	dir := t.TempDir()
+	contract := filepath.Join(dir, "contract.json")
+	if out, err := exec.Command(helper, "contract", contract).CombinedOutput(); err != nil {
+		t.Fatalf("%v %s", err, out)
+	}
+	actual, err := os.ReadFile(contract)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(bytes.TrimSpace(actual), bytes.TrimSpace(sharedConfigurationSchema)) {
+		t.Fatal("Swift and Go field contracts differ")
+	}
+	cfg := DefaultConfig()
+	profile := NewProfile()
+	profile.Host = "fixture.invalid"
+	profile.Username = "tester"
+	cfg.Profiles = []Profile{profile}
+	cfg.Settings.FontSize = 13.123456789012345
+	cfg.Settings.TerminalClockOpacity = .123456789012345
+	palette := ColorPresets()[0].Copy()
+	palette.AutoCursor = true
+	cfg.Settings.CustomSchemes = []ColorScheme{palette}
+	cfg.Settings.ColorSchemeID = palette.ID
+	rule := &cfg.HighlightSets[0].Rules[0]
+	rule.Name = "保留规则名称"
+	rule.Bold = true
+	rule.Background = "#123456"
+	rule.Foreground = "#ABCDEF"
+	cfg.Settings.KeyboardShortcuts.Overrides = map[string]ShortcutOverride{"find": {}, "terminalLineStart": {Shortcut: &KeyboardShortcut{KeyCode: 115, Modifiers: 0}}}
+	vault, err := OpenVault(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	master := []byte("interop-fixture-master-🔐")
+	if err = vault.SetMaster(string(master)); err != nil {
+		t.Fatal(err)
+	}
+	document, _, err := vault.ExportSharedDocument(context.Background(), cfg, master, nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw, err := json.Marshal(document)
+	if err != nil {
+		t.Fatal(err)
+	}
+	canonical, err := canonicalConfigurationJSON(raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	run := func(input []byte, mode string, valid bool) []byte {
+		t.Helper()
+		in, out := filepath.Join(dir, "in.json"), filepath.Join(dir, "out.json")
+		if err := os.WriteFile(in, input, 0600); err != nil {
+			t.Fatal(err)
+		}
+		result, err := exec.Command(helper, mode, in, out).CombinedOutput()
+		if !valid {
+			if err == nil {
+				t.Fatal("Swift accepted unsupported data")
+			}
+			return nil
+		}
+		if err != nil {
+			t.Fatalf("Swift %v %s", err, result)
+		}
+		data, err := os.ReadFile(out)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return data
+	}
+	for i := 0; i < 3; i++ {
+		back := run(canonical, "model-json", true)
+		if !equalSharedJSON(canonical, back) {
+			var a, b map[string]json.RawMessage
+			json.Unmarshal(canonical, &a)
+			json.Unmarshal(back, &b)
+			for key, value := range a {
+				if !equalSharedJSON(value, b[key]) {
+					t.Errorf("model lost %s", key)
+				}
+			}
+			t.FailNow()
+		}
+		doc, err := decodeNativeDocument(back)
+		if err != nil {
+			t.Fatal(err)
+		}
+		config, err := doc.Configuration()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if config.Settings.FontSize != cfg.Settings.FontSize || !config.Settings.CustomSchemes[0].AutoCursor || config.HighlightSets[0].Rules[0].Name != rule.Name || !config.HighlightSets[0].Rules[0].Bold || config.HighlightSets[0].Rules[0].Background != rule.Background {
+			t.Fatal("model fields/precision lost")
+		}
+		exported, _, err := vault.ExportSharedDocument(context.Background(), config, master, &doc, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		next, err := json.Marshal(exported)
+		if err != nil {
+			t.Fatal(err)
+		}
+		canonical, err = canonicalConfigurationJSON(next)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !equalSharedJSON(back, canonical) {
+			t.Fatal("Go model changed shared configuration")
+		}
+	}
+	// Exercise every object definition and reject additional fields before either
+	// language can silently discard them, including nested rule/palette/shortcut data.
+	var base map[string]any
+	json.Unmarshal(canonical, &base)
+	paths := [][]any{{}, {"preferences"}, {"profiles", 0}, {"profiles", 0, "proxy"}, {"profiles", 0, "keepAlive"}, {"preferences", "customColorSchemes", 0}, {"highlightSets", 0}, {"highlightSets", 0, "rules", 0}, {"preferences", "keyboardShortcuts", "overrides", "terminalLineStart", "shortcut"}, {"sessionLinks"}, {"sessionDefaults"}}
+	for n, path := range paths {
+		t.Run(fmt.Sprint("unknown-", n), func(t *testing.T) {
+			var object map[string]any
+			json.Unmarshal(canonical, &object)
+			var target any = object
+			for _, part := range path {
+				switch key := part.(type) {
+				case string:
+					target = target.(map[string]any)[key]
+				case int:
+					target = target.([]any)[key]
+				}
+			}
+			target.(map[string]any)["futureSensitiveField"] = "must-not-be-lost"
+			raw, _ := json.Marshal(object)
+			if _, err := canonicalConfigurationJSON(raw); !errors.Is(err, ErrSharedProtocol) {
+				t.Fatal("Go accepted unsupported field", err)
+			}
+			run(raw, "canonical-json", false)
+			if _, err := decodeNativeDocument(raw); err == nil {
+				t.Fatal("Go decoded unsupported field")
+			}
+		})
+	}
+	// Identical handling of each legacy quick-send scope and of malformed values.
+	for _, value := range []any{0, 1, 2, 3, 4, 5, 6, "current", "tab", "all", "visible", "selected", "currentGroup", "selectedGroups", true, 7, -1, "unknown", 1.5} {
+		var object map[string]any
+		json.Unmarshal(canonical, &object)
+		object["preferences"].(map[string]any)["quickSendScope"] = value
+		raw, _ := json.Marshal(object)
+		goValue, err := canonicalConfigurationJSON(raw)
+		swiftValue := run(raw, "canonical-json", err == nil)
+		if err == nil && !equalSharedJSON(goValue, swiftValue) {
+			t.Fatalf("normalization differs for %v", value)
+		}
+	}
+}
+
+func TestSwiftSessionArchiveUsesSameDefinitions(t *testing.T) {
+	helper := os.Getenv("OSHELL_SWIFT_INTEROP_HELPER")
+	if helper == "" {
+		t.Skip("Swift helper required")
+	}
+	fixture, err := os.ReadFile("testdata/oshell-swift-shared-v1.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	master := []byte("interop-fixture-master-🔐")
+	doc, err := DecodeSharedDocument(fixture, master)
+	if err != nil {
+		t.Fatal(err)
+	}
+	archive := PortableArchive{Format: "OShell.sessions", Version: 4, Profiles: doc.Profiles, Proxies: doc.Proxies, Directories: doc.Directories, Links: doc.Links.Entries}
+	data, err := archive.Encode()
+	if err != nil {
+		t.Fatal(err)
+	}
+	dir := t.TempDir()
+	input, output := filepath.Join(dir, "archive.json"), filepath.Join(dir, "back.json")
+	if err = os.WriteFile(input, data, 0600); err != nil {
+		t.Fatal(err)
+	}
+	if out, err := exec.Command(helper, "archive-roundtrip", input, output).CombinedOutput(); err != nil {
+		t.Fatalf("%v %s", err, out)
+	}
+	back, err := os.ReadFile(output)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !equalSharedJSON(data, back) {
+		t.Fatal("archive wire definitions differ")
+	}
+	decoded, err := DecodePortableArchive(back)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, p := range decoded.Profiles {
+		secret, err := DecryptMacPassword(*p.Password, master, p.Definition)
+		if err != nil || secret != "fixture-"+p.Definition.Kind {
+			t.Fatal("archive credentials lost", err)
+		}
+	}
+	var raw map[string]any
+	json.Unmarshal(data, &raw)
+	raw["unsupportedSecret"] = "fixture"
+	bad, _ := json.Marshal(raw)
+	if _, err = DecodePortableArchive(bad); !errors.Is(err, ErrSharedProtocol) {
+		t.Fatal("unknown archive field accepted", err)
+	}
+	if err = os.WriteFile(input, bad, 0600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = exec.Command(helper, "archive-roundtrip", input, output).CombinedOutput(); err == nil {
+		t.Fatal("native archive silently discarded unknown field")
 	}
 }

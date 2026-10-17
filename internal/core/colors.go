@@ -18,7 +18,7 @@ type ColorScheme struct {
 	Foreground    string   `json:"foreground"`
 	Cursor        string   `json:"cursor"`
 	CursorText    string   `json:"cursorText"`
-	AutoCursor    bool     `json:"autoCursor,omitempty"`
+	AutoCursor    bool     `json:"autoCursor"`
 	Selection     string   `json:"selection"`
 	SelectionText string   `json:"selectionText"`
 	ANSI          []string `json:"ansi"`

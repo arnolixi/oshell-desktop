@@ -25,18 +25,22 @@ type sharedEnvelope struct {
 	Ciphertext []byte `json:"ciphertext"`
 }
 
-func SealShared(data, master []byte) ([]byte, error) {
+func SealShared(data, master []byte) ([]byte, error) { return sealSharedVersion(data, master, 1) }
+func sealSharedVersion(data, master []byte, version int) ([]byte, error) {
+	if version != 1 && version != 2 {
+		return nil, fmt.Errorf("共享协议版本不支持")
+	}
 	if len(data) > 32<<20 || len(master) == 0 || len(master) > 4096 {
 		return nil, fmt.Errorf("共享数据或密码大小无效")
 	}
-	e := sharedEnvelope{Format: "OShell.shared-vault", Version: 1, Iterations: 600000, Salt: make([]byte, 16)}
+	e := sharedEnvelope{Format: "OShell.shared-vault", Version: version, Iterations: 600000, Salt: make([]byte, 16)}
 	if _, err := rand.Read(e.Salt); err != nil {
 		return nil, err
 	}
 	key := pbkdf2.Key(master, e.Salt, e.Iterations, 32, sha256.New)
 	defer clear(key)
 	var err error
-	e.Ciphertext, err = seal(key, data, sharedAAD)
+	e.Ciphertext, err = seal(key, data, sharedEnvelopeAAD(version))
 	if err != nil {
 		return nil, err
 	}
@@ -47,16 +51,22 @@ func OpenShared(data, master []byte) ([]byte, error) {
 		return nil, fmt.Errorf("共享数据超过大小限制")
 	}
 	var e sharedEnvelope
-	if json.Unmarshal(data, &e) != nil || e.Format != "OShell.shared-vault" || e.Version != 1 || e.Iterations < 600000 || e.Iterations > 2000000 || len(e.Salt) != 16 || len(e.Ciphertext) < 28 || len(e.Ciphertext) > 32<<20+28 || len(master) == 0 || len(master) > 4096 {
+	if json.Unmarshal(data, &e) != nil || e.Format != "OShell.shared-vault" || (e.Version != 1 && e.Version != 2) || e.Iterations < 600000 || e.Iterations > 2000000 || len(e.Salt) != 16 || len(e.Ciphertext) < 28 || len(e.Ciphertext) > 32<<20+28 || len(master) == 0 || len(master) > 4096 {
 		return nil, fmt.Errorf("共享数据格式无效")
 	}
 	key := pbkdf2.Key(master, e.Salt, e.Iterations, 32, sha256.New)
 	defer clear(key)
-	plain, err := unseal(key, e.Ciphertext, sharedAAD)
+	plain, err := unseal(key, e.Ciphertext, sharedEnvelopeAAD(e.Version))
 	if err != nil {
 		return nil, fmt.Errorf("共享主密码不正确，或共享数据已损坏")
 	}
 	return plain, nil
+}
+func sharedEnvelopeAAD(version int) string {
+	if version == 2 {
+		return "OShell.shared-vault.v2"
+	}
+	return sharedAAD
 }
 func IsSharedVault(data []byte) bool {
 	var header struct{ Format string }
@@ -146,7 +156,11 @@ func (d SharedDocument) Encode(master []byte) ([]byte, error) {
 	if e != nil {
 		return nil, e
 	}
-	return SealShared(data, master)
+	canonical, err := canonicalConfigurationJSON(data)
+	if err != nil {
+		return nil, err
+	}
+	return sealSharedVersion(canonical, master, 2)
 }
 func DecodeSharedDocument(data, master []byte) (SharedDocument, error) {
 	plain, e := OpenShared(data, master)
@@ -161,6 +175,11 @@ func DecodeSharedDocument(data, master []byte) (SharedDocument, error) {
 	return d, d.Validate(master)
 }
 func decodeNativeDocument(plain []byte) (SharedDocument, error) {
+	canonical, err := canonicalConfigurationJSON(plain)
+	if err != nil {
+		return SharedDocument{}, err
+	}
+	plain = canonical
 	var e error
 	d := SharedDocument{Defaults: DefaultSessionDefaults(), Links: SharedLinks{Visible: true}, HighlightSets: []HighlightSet{StandardHighlightSet()}}
 	if e = json.Unmarshal(plain, &d); e != nil {
@@ -427,7 +446,9 @@ func (v *Vault) ExportSharedDocument(ctx context.Context, cfg Config, master []b
 		document.HighlightSets[i].Rules = append([]HighlightRule{}, document.HighlightSets[i].Rules...)
 		for j := range document.HighlightSets[i].Rules {
 			r := &document.HighlightSets[i].Rules[j]
-			r.Color = r.TextColor()
+			if r.Color == "" {
+				r.Color = r.TextColor()
+			}
 		}
 	}
 	for _, p := range cfg.Profiles {
