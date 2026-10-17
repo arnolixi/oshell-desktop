@@ -4,10 +4,13 @@ package core
 
 import (
 	"fmt"
+	"os"
 	"os/exec"
 	"syscall"
 	"time"
 )
+
+func renameUpdateFile(source, destination string) error { return os.Rename(source, destination) }
 
 func prepareUpdateCommand(cmd *exec.Cmd) { cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true} }
 func waitUpdateParent(pid int, timeout time.Duration) error {

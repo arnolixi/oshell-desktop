@@ -3,12 +3,27 @@
 package core
 
 import (
+	"errors"
 	"fmt"
 	"golang.org/x/sys/windows"
+	"os"
 	"os/exec"
 	"syscall"
 	"time"
 )
+
+// Windows can briefly retain image/scanner handles after process exit. Retry
+// only sharing/access errors; persistent failures still preserve the journal.
+func renameUpdateFile(source, destination string) error {
+	deadline := time.Now().Add(3 * time.Second)
+	for {
+		err := os.Rename(source, destination)
+		if err == nil || (!errors.Is(err, windows.ERROR_ACCESS_DENIED) && !errors.Is(err, windows.ERROR_SHARING_VIOLATION)) || !time.Now().Before(deadline) {
+			return err
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+}
 
 func prepareUpdateCommand(cmd *exec.Cmd) {
 	cmd.SysProcAttr = &syscall.SysProcAttr{HideWindow: true, CreationFlags: windows.CREATE_NO_WINDOW}

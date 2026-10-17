@@ -114,6 +114,12 @@ func TestReleaseDownloadIntegrity(t *testing.T) {
 func testPortablePlan(t *testing.T) portablePlan {
 	t.Helper()
 	dir := t.TempDir()
+	// Match ReleaseUpdate.Prepare: Windows TEMP can use a short path or
+	// different casing, while startup resolves the executable's canonical path.
+	dir, err := filepath.EvalSymlinks(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
 	stage := ".oshell-update-test"
 	exe := "OShell Desktop.exe"
 	if runtime.GOOS != "windows" {
@@ -325,7 +331,8 @@ func TestPortableHelperLifecycle(t *testing.T) {
 					t.Fatal(e)
 				}
 				if e := cmd.Wait(); e != nil {
-					t.Fatal(e)
+					out, _ := os.ReadFile(filepath.Join(dir, "fixture-error"))
+					t.Fatalf("recovery startup: %v; %s", e, out)
 				}
 			} else {
 				if e := u.Start(); e != nil {
@@ -370,7 +377,9 @@ func TestPortableHelperLifecycle(t *testing.T) {
 				want = incoming
 			}
 			if b, _ := os.ReadFile(p.Executable); !bytes.Equal(b, want) {
-				t.Fatal("wrong installed executable")
+				result, _ := os.ReadFile(filepath.Join(dir, portableResult))
+				out, _ := os.ReadFile(filepath.Join(dir, "fixture-error"))
+				t.Fatalf("wrong installed executable; result: %s; fixture: %s", result, out)
 			}
 			if b, _ := os.ReadFile(filepath.Join(dir, "config.json")); string(b) != "synthetic config" {
 				t.Fatal("configuration changed")

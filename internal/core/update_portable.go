@@ -449,7 +449,7 @@ func replaceUpdateFile(source, destination string) error {
 		return e
 	}
 	defer os.Remove(temp)
-	return os.Rename(temp, destination)
+	return renameUpdateFile(temp, destination)
 }
 func applyPortableFiles(p portablePlan) error {
 	dir := filepath.Dir(p.Executable)
