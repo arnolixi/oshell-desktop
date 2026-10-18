@@ -83,9 +83,9 @@ func TestTerminalWorkspaceAndClose(t *testing.T) {
 	a.tabs = []*tab{workspace}
 	tt := ui.NewTester(a.view, 1280, 820)
 	tt.Frame()
-	splitMenu := "分屏"
-	if runtime.GOOS == "windows" {
-		splitMenu = "视图"
+	splitMenu := "视图"
+	if runtime.GOOS == "darwin" {
+		splitMenu = "分屏"
 	}
 	if err := tt.Click(splitMenu); err != nil {
 		t.Fatal(err)
