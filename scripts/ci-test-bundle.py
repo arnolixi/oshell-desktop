@@ -76,7 +76,7 @@ def execute_windows(shard):
             continue
         run([BUNDLE / item['binary'], '-test.v', '-test.paniconexit0', '-test.count=1', '-test.timeout=5m', '-test.run', item['pattern']],
             cwd=ROOT / item['directory'])
-    for script in ['test-build.py', 'test-configuration-contract.py', 'test-core-shards.py']:
+    for script in ['test-build.py', 'test-configuration-contract.py', 'test-core-shards.py', 'test-runner-artifact.py']:
         run([sys.executable, ROOT / 'scripts' / script], cwd=ROOT)
 
 
@@ -100,7 +100,7 @@ def linux(shard=None):
     run(['go', 'test', '-race', '-count=1', '-timeout=5m', *RACE[1:]], cwd=ROOT)
     run(['xvfb-run', '-a', 'dbus-run-session', '--', 'go', 'test', '-count=1', '-timeout=180s', './...'], cwd=ROOT)
     run(['go', 'test', '-count=1', *PARSERS, '-run', 'Test(UNIXMetadata|OwnerHints|Parse)'], cwd=ROOT)
-    for script in ['test-build.py', 'test-core-shards.py', 'test-configuration-contract.py']:
+    for script in ['test-build.py', 'test-core-shards.py', 'test-configuration-contract.py', 'test-runner-artifact.py']:
         run([sys.executable, ROOT / 'scripts' / script], cwd=ROOT)
     run(['go', 'build', './...'], cwd=ROOT, env=dict(os.environ, CGO_ENABLED='0'))
     run(['go', 'vet', './...'], cwd=ROOT)

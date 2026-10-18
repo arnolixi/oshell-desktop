@@ -7,10 +7,37 @@ concurrency:
   group: self-hosted-build-trial
   cancel-in-progress: false
 jobs:
+  windows-tools:
+    if: github.ref == 'refs/heads/main'
+    runs-on: [self-hosted, Windows, X64]
+    timeout-minutes: 15
+    defaults:
+      run:
+        shell: powershell -NoProfile -ExecutionPolicy Bypass -File {0}
+    steps:
+      - name: Verify selected Windows machine
+        run: |
+          if ($env:RUNNER_NAME -ne 'LAPTOP-NGQ35G2T') { throw 'Unexpected Windows runner' }
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+          path: runner-bootstrap
+          sparse-checkout: scripts
+      - name: Prepare persistent verified tool caches alongside Linux compilation
+        run: ./runner-bootstrap/scripts/prepare-runner-tools.ps1
+      - uses: actions/setup-python@v5
+        env:
+          PSExecutionPolicyPreference: Bypass
+        with:
+          python-version: '3.12.10'
+          check-latest: false
   package:
     if: github.ref == 'refs/heads/main'
     runs-on: [self-hosted, Linux, X64]
     timeout-minutes: 60
+    outputs:
+      windows-artifact-id: ${{ steps.windows-bundle.outputs.artifact-id }}
+      windows-artifact-digest: ${{ steps.windows-bundle.outputs.artifact-digest }}
     steps:
       - name: Verify selected Linux machine and Docker
         shell: bash
@@ -45,21 +72,31 @@ jobs:
           started=$SECONDS
           bash scripts/build-on-runner.sh package
           printf 'Warm package build: %ss\n' "$((SECONDS-started))" | tee -a "$GITHUB_STEP_SUMMARY"
+      - name: Combine Windows tests and portable package into one transfer
+        shell: bash
+        run: |
+          mkdir -p validation/container-package
+          cp dist/OShell-Desktop-windows-amd64-single-file.zip validation/container-package/
       - uses: actions/upload-artifact@v4
+        id: windows-bundle
         with:
-          name: windows-tests
-          path: validation/windows-tests/*
+          name: windows-validation
+          path: |
+            validation/windows-tests/*
+            validation/container-package/OShell-Desktop-windows-amd64-single-file.zip
           if-no-files-found: error
           retention-days: 7
       - uses: actions/upload-artifact@v4
         with:
           name: oshell-windows-amd64
+          compression-level: 0
           path: dist/OShell-Desktop-windows-amd64-single-file.zip
           if-no-files-found: error
           retention-days: 7
       - uses: actions/upload-artifact@v4
         with:
           name: oshell-linux-amd64
+          compression-level: 0
           path: dist/OShell-Desktop-linux-amd64.tar.gz
           if-no-files-found: error
           retention-days: 7
@@ -89,61 +126,56 @@ jobs:
           bash scripts/build-on-runner.sh linux
           printf 'Linux regression: %ss\n' "$((SECONDS-started))" | tee -a "$GITHUB_STEP_SUMMARY"
   windows:
-    needs: package
+    needs: [package, windows-tools]
     runs-on: [self-hosted, Windows, X64]
     timeout-minutes: 25
+    permissions:
+      contents: read
+      actions: read
     defaults:
       run:
         shell: pwsh -NoProfile -ExecutionPolicy Bypass -File {0}
     steps:
-      - name: Verify selected Windows machine and execution tools
+      - name: Verify selected Windows machine
         shell: powershell -NoProfile -ExecutionPolicy Bypass -File {0}
         run: |
           $ErrorActionPreference = 'Stop'
-          $ProgressPreference = 'SilentlyContinue'
           if ($env:RUNNER_NAME -ne 'LAPTOP-NGQ35G2T') { throw 'Unexpected Windows runner' }
-          # Scope script execution to this CI process; leave machine/user policies intact.
-          # A fresh self-hosted runner may have only Windows PowerShell 5.1.
-          $destination = Join-Path $env:RUNNER_TEMP "pwsh-$env:GITHUB_RUN_ID-$env:GITHUB_RUN_ATTEMPT"
-          $archive = "$destination.zip"
-          [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
-          Invoke-WebRequest -UseBasicParsing 'https://github.com/PowerShell/PowerShell/releases/download/v7.6.7/PowerShell-7.6.7-win-x64.zip' -OutFile $archive
-          if ((Get-FileHash $archive -Algorithm SHA256).Hash -ne 'D2F952EBDBF24386CB8923553AA58E41A846DB35A6155EA04C58142A4B16DBB7') { throw 'PowerShell archive checksum mismatch' }
-          Expand-Archive -LiteralPath $archive -DestinationPath $destination -Force
-          $destination | Out-File $env:GITHUB_PATH -Append -Encoding utf8
           "Runner: $env:RUNNER_NAME; CPU threads: $env:NUMBER_OF_PROCESSORS" | Out-File $env:GITHUB_STEP_SUMMARY -Append -Encoding utf8
       - uses: actions/checkout@v4
         with:
           persist-credentials: false
+      - name: Activate verified cached PowerShell and rz sz tools
+        shell: powershell -NoProfile -ExecutionPolicy Bypass -File {0}
+        run: ./scripts/prepare-runner-tools.ps1
       - uses: actions/setup-python@v5
         env:
           # setup-python launches Windows PowerShell itself; scope the policy to its children.
           PSExecutionPolicyPreference: Bypass
         with:
-          python-version: '3.12'
-      - uses: actions/download-artifact@v4
-        with:
-          name: windows-tests
-          path: validation/windows-tests
-      - name: Prepare pinned Windows rz sz interoperability peer
+          python-version: '3.12.10'
+          check-latest: false
+      - name: Test cache recovery and artifact verification
         run: |
           $ErrorActionPreference = 'Stop'
-          $archive = Join-Path $env:RUNNER_TEMP 'lrzsz-peer.zip'
-          $destination = Join-Path $env:RUNNER_TEMP "lrzsz-peer-$env:GITHUB_RUN_ID-$env:GITHUB_RUN_ATTEMPT"
-          Invoke-WebRequest 'https://github.com/trzsz/lrzsz-win32/releases/download/v0.12.21rc/lrzsz_0.12.21rc_windows_x86_64.zip' -OutFile $archive
-          if ((Get-FileHash $archive -Algorithm SHA256).Hash -ne 'DACE2DB172B1B5A1E5998692760A75355B254E1826718D88BAE7FA3A6DE3C325') { throw 'lrzsz fixture checksum mismatch' }
-          Expand-Archive -LiteralPath $archive -DestinationPath $destination -Force
-          (Join-Path $destination 'lrzsz_0.12.21rc_windows_x86_64') | Out-File $env:GITHUB_PATH -Encoding utf8 -Append
-          'OSHELL_REQUIRE_LRZSZ=1' | Out-File $env:GITHUB_ENV -Encoding utf8 -Append
+          ./scripts/test-runner-tools.ps1
+          python scripts/test-runner-artifact.py
+          exit $LASTEXITCODE
+      - name: Download combined Windows inputs with bounded retries and SHA256 verification
+        timeout-minutes: 8
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ARTIFACT_ID: ${{ needs.package.outputs.windows-artifact-id }}
+          ARTIFACT_DIGEST: ${{ needs.package.outputs.windows-artifact-digest }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          python scripts/download_runner_artifact.py --id $env:ARTIFACT_ID --digest $env:ARTIFACT_DIGEST
+          exit $LASTEXITCODE
       - name: Execute precompiled regression suite and PTY ZMODEM race tests
         run: |
           $ErrorActionPreference = 'Stop'
           python scripts/ci-test-bundle.py windows
           exit $LASTEXITCODE
-      - uses: actions/download-artifact@v4
-        with:
-          name: oshell-windows-amd64
-          path: validation/container-package
       - name: Verify single-file GUI and update preservation without compiling
         run: |
           $ErrorActionPreference = 'Stop'
