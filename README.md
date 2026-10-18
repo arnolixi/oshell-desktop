@@ -43,7 +43,7 @@ go run .
 
 保留 Windows / Linux 全量回归、桌面与终端、core / PTY / ZMODEM 竞态检测、配置合同和构建工具测试，以及真实 Windows 单文件启动、DLL 释放、升级重启和配置保留验证。Linux 使用虚拟显示运行桌面测试。
 
-core 竞态测试根据历史时间分成 4 片。Linux 在一个容器内并发运行 4 个独立测试进程；Windows 使用 4 个独立执行任务。初始调度权重来自普通测试计时，后续完整竞态运行自动产出真实时间日志。每次从本次二进制自动发现测试，新增测试不会遗漏；原始日志与执行清单须通过汇总审计。详见 [CI 性能说明](docs/ci-performance.md)。
+core 竞态测试根据历史时间分成 4 片。Linux 使用 4 个独立 Ubuntu Runner，各自在容器内执行；Windows 使用 4 个独立执行任务。调度权重由完整竞态分片的真实日志生成，每次运行继续产出逐项耗时。每次从本次二进制自动发现测试，新增测试不会遗漏；原始日志与执行清单须通过汇总审计。详见 [CI 性能说明](docs/ci-performance.md)。
 
 Docker Buildx 使用 GitHub Actions 缓存保存系统依赖镜像层，`actions/cache` 保存 Go 模块、编译缓存和原生资源，官方 Runner 更换后仍能复用；测试结果不缓存。两平台打包按顺序执行，避免临时嵌入资源相互覆盖。官方 Ubuntu Runner 提供 Docker 和 GitHub CLI；宿主只准备与 `go.mod` 一致的 Go 工具链并只读挂载容器。构建容器不挂载 Docker socket 或用户凭据，结束后恢复工作区所有权。
 

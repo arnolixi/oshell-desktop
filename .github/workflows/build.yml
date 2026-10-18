@@ -45,14 +45,31 @@ jobs:
       - uses: actions/checkout@v4
         with:
           persist-credentials: false
-      - name: Full Linux tests and four concurrent core race processes in Docker
+      - name: Full Linux regression and PTY/ZMODEM race tests in Docker
         uses: ./.github/actions/container-build
         with:
           mode: linux
+  core-race-linux:
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [0, 1, 2, 3]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Compile and execute isolated Linux core race shard in Docker
+        uses: ./.github/actions/container-build
+        with:
+          mode: linux-core
+          shard: ${{ matrix.shard }}
+          cache-scope: linux
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: core-race-Linux
+          name: core-race-Linux-${{ matrix.shard }}
           path: validation/core-race/*
           if-no-files-found: error
           retention-days: 14
@@ -128,7 +145,7 @@ jobs:
           retention-days: 14
   core-race-audit:
     if: always() && needs.linux.result != 'skipped'
-    needs: [linux, core-race-windows]
+    needs: [linux, core-race-linux, core-race-windows]
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
@@ -145,7 +162,7 @@ jobs:
           docker run --rm -e GITHUB_SHA -v "$PWD:/workspace:ro" -w /workspace python:3.12-slim python scripts/core_test_shards.py audit validation/core-race --count 4 | tee -a "$GITHUB_STEP_SUMMARY"
   release:
     if: startsWith(github.ref, 'refs/tags/v')
-    needs: [linux, windows, core-race-windows, core-race-audit, package]
+    needs: [linux, windows, core-race-linux, core-race-windows, core-race-audit, package]
     runs-on: ubuntu-24.04
     permissions:
       contents: write

@@ -98,7 +98,7 @@ def run_shard(args):
     cwd = ROOT
     if binary:
         command = [str(args.test2json.resolve()), '-p', PACKAGE, '-t', str(binary.resolve()),
-                   '-test.v=test2json', '-test.count=1', '-test.timeout=30m', '-test.run', pattern]
+                   '-test.v=test2json', '-test.paniconexit0', '-test.count=1', '-test.timeout=30m', '-test.run', pattern]
         cwd = ROOT / 'internal/core'
     events = []
     with prefix.with_suffix('.jsonl').open('w', encoding='utf-8') as log:

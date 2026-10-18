@@ -120,11 +120,13 @@ class ShardTests(unittest.TestCase):
                  patch.object(shards.subprocess, 'check_output', return_value='TestAdded\n') as listing, \
                  patch.object(shards.subprocess, 'Popen', return_value=Process()) as run:
                 shards.run_shard(args)
-                self.assertEqual(listing.call_args.args[0], [str(args.binary), '-test.list', '.'])
+                # Hosted Windows TEMP may contain an 8.3 username alias.
+                self.assertEqual(listing.call_args.args[0], [str(args.binary.resolve()), '-test.list', '.'])
                 command = run.call_args.args[0]
-                self.assertEqual(command[0], str(args.test2json))
-                self.assertIn(str(args.binary), command)
+                self.assertEqual(command[0], str(args.test2json.resolve()))
+                self.assertIn(str(args.binary.resolve()), command)
                 self.assertIn('-test.count=1', command)
+                self.assertIn('-test.paniconexit0', command)
                 self.assertEqual(command[command.index('-test.run') + 1], '^(TestAdded)$')
 
 

@@ -9,7 +9,10 @@ git config --global --add safe.directory /workspace
 go version
 go env GOCACHE GOMODCACHE
 
-if [[ "${1:-package}" == linux ]]; then
+if [[ "${1:-package}" == linux-core ]]; then
+  python3 scripts/ci-test-bundle.py linux-core --shard "${OSHELL_CI_SHARD:?Missing core shard index}"
+  exit
+elif [[ "${1:-package}" == linux ]]; then
   python3 scripts/ci-test-bundle.py linux
   exit
 fi
