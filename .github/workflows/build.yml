@@ -5,23 +5,82 @@ on:
   workflow_dispatch:
 permissions:
   contents: read
+concurrency:
+  group: build-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ !startsWith(github.ref, 'refs/tags/') }}
 jobs:
-  test:
-    strategy:
-      fail-fast: false
-      matrix:
-        os: [windows-latest, ubuntu-24.04]
-    runs-on: ${{ matrix.os }}
+  package:
+    # Never run untrusted pull request code on the organization's private server.
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: [self-hosted, linux, x64, docker-runner]
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
       - uses: actions/setup-go@v5
         with:
           go-version-file: go.mod
+          cache: false
+      - name: Compile both applications and all Windows tests inside Docker
+        shell: bash
+        run: bash scripts/build-on-runner.sh package
+      - uses: actions/upload-artifact@v4
+        with:
+          name: windows-tests
+          path: validation/windows-tests/*
+          if-no-files-found: error
+          retention-days: 7
+      - uses: actions/upload-artifact@v4
+        with:
+          name: oshell-windows-amd64
+          path: dist/OShell-Desktop-windows-amd64-single-file.zip
+          if-no-files-found: error
+          retention-days: 7
+      - uses: actions/upload-artifact@v4
+        with:
+          name: oshell-linux-amd64
+          path: dist/OShell-Desktop-linux-amd64.tar.gz
+          if-no-files-found: error
+          retention-days: 7
+  linux:
+    needs: package
+    runs-on: [self-hosted, linux, x64, docker-runner]
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: false
+      - name: Full Linux tests and four concurrent core race processes in Docker
+        shell: bash
+        run: bash scripts/build-on-runner.sh linux
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: core-race-Linux
+          path: validation/core-race/*
+          if-no-files-found: error
+          retention-days: 14
+  windows:
+    needs: package
+    runs-on: windows-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
+      - uses: actions/download-artifact@v4
+        with:
+          name: windows-tests
+          path: validation/windows-tests
       - name: Prepare pinned Windows rz/sz interoperability peer
-        if: runner.os == 'Windows'
         shell: pwsh
         run: |
           $archive = Join-Path $env:RUNNER_TEMP 'lrzsz-peer.zip'
@@ -33,110 +92,13 @@ jobs:
           Expand-Archive -LiteralPath $archive -DestinationPath $destination
           (Join-Path $destination 'lrzsz_0.12.21rc_windows_x86_64') | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
           'OSHELL_REQUIRE_LRZSZ=1' | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
-      - name: Prepare Linux runtime and rz/sz interoperability peer
-        if: runner.os == 'Linux'
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends libwebkit2gtk-4.1-0 xvfb xauth dbus-x11 libgl1-mesa-dri libglx-mesa0 libegl-mesa0 fonts-dejavu-core fonts-noto-cjk lrzsz
-          echo 'OSHELL_REQUIRE_LRZSZ=1' >> "$GITHUB_ENV"
-      - name: Core, PTY and ZMODEM race checks
-        # Production-strength key derivation exceeds Go's default 10m timeout under -race.
-        timeout-minutes: 35
-        run: go test -race -count=1 -timeout=30m ./internal/core ./internal/terminal/internal/pty ./internal/zmodem
-      - name: Full regression suite
-        if: runner.os == 'Windows'
-        run: go test -count=1 -timeout=180s ./...
-      - name: Full Linux regression suite
-        if: runner.os == 'Linux'
-        run: xvfb-run -a dbus-run-session -- go test -count=1 -timeout=180s ./...
-      - name: Patched listing parsers
-        run: go test github.com/jlaffaye/ftp github.com/pkg/sftp -run 'Test(UNIXMetadata|OwnerHints|Parse)'
-      - name: Portable publication tests
-        run: python scripts/test-build.py
-      - name: Configuration contract tooling
-        run: python scripts/test-configuration-contract.py
-      - name: Compile native UI
-        env:
-          CGO_ENABLED: '0'
-        run: go build ./...
-      - name: Vet
-        run: go vet ./...
-  package:
-    # Public pull requests must not execute code on the private build server.
-    # Build alongside regression tests; release still requires every check.
-    if: github.event_name != 'pull_request' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v'))
-    runs-on: [self-hosted, Linux, X64, self-dev]
-    timeout-minutes: 30
-    container:
-      image: ubuntu:24.04
-    defaults:
-      run:
-        shell: bash
-    env:
-      CGO_ENABLED: '0'
-      GOTOOLCHAIN: local
-      GOFLAGS: -mod=readonly
-      GOCACHE: /tmp/oshell-go-build
-      GOMODCACHE: /tmp/oshell-go-mod
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - target: windows/amd64
-            artifact: windows-amd64
-            options: --single-file
-          - target: linux/amd64
-            artifact: linux-amd64
-            options: ''
-    steps:
-      - name: Prepare build container
-        run: |
-          test -f /.dockerenv
-          apt-get update
-          apt-get install -y --no-install-recommends ca-certificates git curl python3 unzip
-          printf 'Runner: %s\nTarget: %s\n' "$RUNNER_NAME" '${{ matrix.target }}'
-          cat /etc/os-release
-      - uses: actions/checkout@v4
-        with:
-          persist-credentials: false
-      - uses: actions/setup-go@v5
-        with:
-          go-version-file: go.mod
-          cache: false
-      - name: Package application in container
-        run: |
-          # Checkout's safe.directory applies only to its temporary HOME.
-          # Go also reads Git metadata from the host-owned workspace.
-          git config --global --add safe.directory "$GITHUB_WORKSPACE"
-          git status --short
-          python3 scripts/build.py --target ${{ matrix.target }} ${{ matrix.options }} --archive
-      - uses: actions/upload-artifact@v4
-        with:
-          name: oshell-${{ matrix.artifact }}
-          path: |
-            dist/*.zip
-            dist/*.tar.gz
-          if-no-files-found: error
-          retention-days: 7
-      - name: Restore workspace ownership for the host runner
-        if: always()
-        run: |
-          # Checkout/build run as container root; keep the next host checkout writable.
-          chown -R --no-dereference "$(stat -c '%u:%g' "$GITHUB_WORKSPACE")" "$GITHUB_WORKSPACE"
-  verify-windows-package:
-    needs: package
-    runs-on: windows-latest
-    timeout-minutes: 15
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
-        with:
-          go-version-file: go.mod
+      - name: Execute precompiled full regression suite, PTY and ZMODEM race tests
+        run: python scripts/ci-test-bundle.py windows
       - uses: actions/download-artifact@v4
         with:
           name: oshell-windows-amd64
           path: validation/container-package
-      - name: Verify cross-compiled single-file application and update preservation
+      - name: Verify single-file GUI and update preservation without compiling
         shell: pwsh
         run: |
           Expand-Archive -LiteralPath 'validation/container-package/OShell-Desktop-windows-amd64-single-file.zip' -DestinationPath 'validation/container-package/extracted'
@@ -144,31 +106,75 @@ jobs:
           if ($files.Count -ne 1 -or $files[0].Name -ne 'OShell Desktop.exe') {
             throw 'Expected exactly one portable EXE in the Windows archive'
           }
-          ./scripts/test-update-package.ps1 -Executable $files[0].FullName
+          ./scripts/test-update-package.ps1 -Executable $files[0].FullName -FixtureExecutable validation/windows-tests/update-fixture.exe
+  core-race-windows:
+    needs: package
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [0, 1, 2, 3]
+    runs-on: windows-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: actions/download-artifact@v4
+        with:
+          name: windows-tests
+          path: validation/windows-tests
+      - name: Execute precompiled race shard with complete test accounting
+        run: python scripts/ci-test-bundle.py windows --shard ${{ matrix.shard }}
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: core-race-Windows-${{ matrix.shard }}
+          path: validation/core-race/*
+          if-no-files-found: error
+          retention-days: 14
+  core-race-audit:
+    if: always() && needs.linux.result != 'skipped'
+    needs: [linux, core-race-windows]
+    runs-on: [self-hosted, linux, x64, docker-runner]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: core-race-*
+          path: validation/core-race
+          merge-multiple: true
+      - name: Require every discovered test exactly once on both platforms
+        shell: bash
+        run: |
+          docker run --rm -e GITHUB_SHA -v "$PWD:/workspace:ro" -w /workspace python:3.12-slim python scripts/core_test_shards.py audit validation/core-race --count 4 | tee -a "$GITHUB_STEP_SUMMARY"
   release:
     if: startsWith(github.ref, 'refs/tags/v')
-    needs: [test, package, verify-windows-package]
-    runs-on: ubuntu-24.04
+    needs: [linux, windows, core-race-windows, core-race-audit, package]
+    runs-on: [self-hosted, linux, x64, docker-runner]
     permissions:
       contents: write
     steps:
       - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
       - name: Check release version
+        shell: bash
         env:
           RELEASE_TAG: ${{ github.ref_name }}
         run: |
-          python3 - <<'PY'
-          import json, os
-          from pathlib import Path
-          version = json.loads(Path('mygo.json').read_text(encoding='utf-8'))['version']
-          assert os.environ['RELEASE_TAG'] == 'v' + version, 'Release tag must match the built application version'
-          PY
+          docker run --rm -e RELEASE_TAG -v "$PWD:/workspace:ro" -w /workspace python:3.12-slim python -c 'import json,os; assert os.environ["RELEASE_TAG"] == "v" + json.load(open("mygo.json"))["version"], "Release tag must match application version"'
       - uses: actions/download-artifact@v4
         with:
           pattern: oshell-*
           path: release-assets
           merge-multiple: true
       - name: Publish Windows and Linux release packages
+        shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
           RELEASE_TAG: ${{ github.ref_name }}

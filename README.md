@@ -39,12 +39,15 @@ go run .
 
 ## GitHub Actions
 
-工作流 `.github/workflows/build.yml` 在 Windows 和 Linux 上运行全量回归（包含桌面与终端）、核心、PTY 与 ZMODEM 竞态检测、编译和静态检查。Linux 使用虚拟显示运行桌面回归。
-发布包统一在自托管 Linux x64 Runner `develop`（标签 `self-dev`）的 `ubuntu:24.04` 作业容器中编译，生成 Windows amd64 单文件 ZIP 和 Linux amd64 tar.gz。宿主机需安装 Docker，并允许 Runner 用户创建容器；Go、Python 和构建依赖在容器内准备。
+工作流 `.github/workflows/build.yml` 使用组织 Runner 标签 `[self-hosted, linux, x64, docker-runner]`。所有 Go 编译、静态检查、应用打包及测试辅助程序构建均在 Docker 容器中执行；GitHub Windows 机器只执行同一提交的预编译 EXE 和测试程序，不安装或调用 Go 编译器。
 
-编译打包与原生回归并行，Windows 额外下载容器生成的 EXE，验证启动、DLL 自动释放、升级重启和配置保留。所有测试、打包与产物验证通过后才允许发布 Release。Artifacts 可能在测试结束前出现，下载时应确认整次工作流成功。
+保留 Windows / Linux 全量回归、桌面与终端、core / PTY / ZMODEM 竞态检测、配置合同和构建工具测试，以及真实 Windows 单文件启动、DLL 释放、升级重启和配置保留验证。Linux 使用虚拟显示运行桌面测试。
 
-只有 `main` 和 `v*` 标签触发自托管构建（也可对 `main` 手动运行）；PR 和其他分支只在 GitHub 托管机器上测试，不进入本地服务器。容器不挂载额外宿主机目录，不使用特权模式；任务结束后恢复工作区文件所有权，避免影响 Runner 后续检出。
+core 竞态测试根据历史时间分成 4 片。Linux 在一个容器内并发运行 4 个独立测试进程，只有一个组织 Runner 也能并行；Windows 使用 4 个独立执行任务。初始调度权重来自普通测试计时，后续完整竞态运行自动产出真实时间日志。每次从本次二进制自动发现测试，新增测试不会遗漏；原始日志与执行清单须通过汇总审计。详见 [CI 性能说明](docs/ci-performance.md)。
+
+Docker 镜像缓存系统依赖，专用卷持久保存 Go 模块、编译缓存和原生资源；测试结果不缓存。两平台打包按顺序执行，避免临时嵌入资源相互覆盖。组织 Runner 需要 Docker 和 GitHub CLI；宿主只准备与 `go.mod` 一致的 Go 工具链并只读挂载容器。构建容器不挂载 Docker socket 或用户凭据，结束后恢复工作区所有权。
+
+自托管任务接受仓库自身分支与手动运行，不执行来自外部 fork 的 PR 代码。外部贡献须先审查，再由维护者将确认的提交放入仓库分支运行完整 CI。所有回归、分片审计、打包与产物验证成功后才允许发布 Release；Artifacts 提前出现不代表测试已通过。
 
 CI 使用统一入口：
 

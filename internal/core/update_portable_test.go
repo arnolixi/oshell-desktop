@@ -283,10 +283,19 @@ func TestPortableHelperLifecycle(t *testing.T) {
 	if runtime.GOOS != "windows" && runtime.GOOS != "linux" {
 		t.Skip("portable updater platform")
 	}
-	fixture := filepath.Join(t.TempDir(), "fixture"+executableSuffix())
-	build := exec.Command(filepath.Join(runtime.GOROOT(), "bin", "go"+executableSuffix()), "build", "-o", fixture, "./testdata/update-fixture")
-	if out, e := build.CombinedOutput(); e != nil {
-		t.Fatalf("fixture build: %v\n%s", e, out)
+	fixture := os.Getenv("OSHELL_UPDATE_FIXTURE")
+	if fixture == "" {
+		if os.Getenv("OSHELL_PRECOMPILED_TESTS") == "1" {
+			t.Fatal("precompiled test run requires OSHELL_UPDATE_FIXTURE")
+		}
+		fixture = filepath.Join(t.TempDir(), "fixture"+executableSuffix())
+		build := exec.Command(filepath.Join(runtime.GOROOT(), "bin", "go"+executableSuffix()), "build", "-o", fixture, "./testdata/update-fixture")
+		if out, e := build.CombinedOutput(); e != nil {
+			t.Fatalf("fixture build: %v\n%s", e, out)
+		}
+	}
+	if info, err := os.Stat(fixture); err != nil || info.IsDir() {
+		t.Fatalf("invalid update fixture: %s (%v)", fixture, err)
 	}
 	for _, scenario := range []string{"success", "new crashes", "crash after ready", "interrupted"} {
 		t.Run(scenario, func(t *testing.T) {

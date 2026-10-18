@@ -16,7 +16,7 @@ import (
 	"time"
 )
 
-const DefaultUpdateRepository = "arnolixi/oshell-desktop"
+const DefaultUpdateRepository = "oshell-desktop/oshell-desktop"
 
 type ReleaseUpdate struct {
 	Version, Notes     string

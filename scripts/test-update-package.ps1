@@ -1,14 +1,18 @@
-param([Parameter(Mandatory=$true)][string]$Executable)
+param(
+    [Parameter(Mandatory=$true)][string]$Executable,
+    [Parameter(Mandatory=$true)][string]$FixtureExecutable
+)
 $ErrorActionPreference = 'Stop'
 $taskRoot = (Resolve-Path -LiteralPath '.').Path
 $taskSource = (Resolve-Path -LiteralPath $Executable).Path
+$taskFixture = (Resolve-Path -LiteralPath $FixtureExecutable).Path
 $taskVersion = (Get-Content -LiteralPath (Join-Path $taskRoot 'mygo.json') -Raw | ConvertFrom-Json).version
 $taskSandbox = Join-Path $taskRoot ('validation/update-package-smoke-' + [guid]::NewGuid().ToString('N'))
 $taskApp = Join-Path $taskSandbox '中文 便携程序'
 New-Item -ItemType Directory -Path $taskApp | Out-Null
 $taskExe = Join-Path $taskApp 'OShell Desktop.exe'
 Copy-Item -LiteralPath $taskSource -Destination $taskExe
-& go run ./internal/core/testdata/update-fixture --create-state $taskApp
+& $taskFixture --create-state $taskApp
 if ($LASTEXITCODE -ne 0) { throw 'Unable to create synthetic configuration' }
 $env:LOCALAPPDATA = Join-Path $taskSandbox 'cache'
 $taskOwned = [System.Collections.Generic.List[System.Diagnostics.Process]]::new()
@@ -74,7 +78,7 @@ try {
     foreach ($taskName in $taskBefore.Keys) {
         if ((Get-FileHash -LiteralPath (Join-Path $taskApp $taskName) -Algorithm SHA256).Hash -ne $taskBefore[$taskName]) { throw "Portable data changed: $taskName" }
     }
-    & go run ./internal/core/testdata/update-fixture --verify-state $taskApp
+    & $taskFixture --verify-state $taskApp
     if ($LASTEXITCODE -ne 0) { throw 'Synthetic session or saved password lost after update' }
     [pscustomobject]@{Version=$taskVersion;SingleFileUpdate=$true;RestartReceipt=$true;GuiReady=$true;DataPreserved=@($taskBefore.Keys);Result=[IO.File]::ReadAllText((Join-Path $taskApp '.oshell-update-result.txt'));TestDirectory=$taskSandbox} |
         ConvertTo-Json | Set-Content -LiteralPath (Join-Path $taskRoot 'validation/update-package-smoke.json')

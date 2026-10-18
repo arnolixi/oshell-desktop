@@ -1,7 +1,7 @@
 # Windows / Linux 自更新
 
 Windows amd64 单文件便携版和 Linux amd64 运行包使用 GitHub Release。
-默认仓库是 `arnolixi/oshell-desktop`，设置 → 更新中可修改仓库，手动检查，或启用每日自动检查。
+默认仓库是 `oshell-desktop/oshell-desktop`，设置 → 更新中可修改仓库，手动检查，或启用每日自动检查。
 自动检查只提示新版本；下载及安装均由用户确认。安装会关闭所有窗口中的连接和文件传输。
 
 私有仓库可在同一页面填写 GitHub 访问令牌，授予目标仓库 Contents 读取权限，点击“保存令牌”。先应用仓库地址再保存令牌。令牌按仓库隔离，在数据目录的 `update-auth/` 独立本机密码库中加密保存；不写入会话配置或共享同步文件，不回显。公开仓库无需令牌。下载私有附件走 GitHub asset API，跳转到 CDN 时移除 Authorization，令牌失效可替换或清除。
@@ -48,4 +48,4 @@ Linux 自更新适用于解压到用户可写目录的 tar.gz 运行包。系统
 `go test ./internal/core -run 'Test(Release|Portable)'` 覆盖正式版本选择、拒绝降级、附件来源、摘要校验、取消下载、危险压缩包、配置保留和重复回滚。
 `TestPortableHelperLifecycle` 使用真实子进程验证 Windows/Linux 可执行文件占用、成功重启、新版崩溃回滚和中断后恢复，不访问真实用户配置。
 
-实际 Windows 单文件包验证可运行 `./scripts/test-update-package.ps1 -Executable <构建后的EXE>`，使用独立合成会话和加密密码，检查重启、配置哈希及密码解密。
+实际 Windows 单文件包验证可运行 `./scripts/test-update-package.ps1 -Executable <构建后的EXE> -FixtureExecutable <容器预编译的update-fixture.exe>`，使用独立合成会话和加密密码，检查重启、配置哈希及密码解密。

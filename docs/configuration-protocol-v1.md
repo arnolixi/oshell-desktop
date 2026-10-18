@@ -4,7 +4,7 @@
 
 规范标识：`OShell.shared-vault/v1`
 文档修订：`1.0`（2026-10-17）
-维护源：`arnolixi/oshell-desktop` 仓库的 `docs/configuration-protocol-v1.md`
+维护源：`oshell-desktop/oshell-desktop` 仓库的 `docs/configuration-protocol-v1.md`
 适用：macOS OShell 与 OShell Desktop 的共享配置交换。
 
 本规范描述已实现的 v1 线格式及双方约束。文档修订号不是应用版本，也不增加任何磁盘字段。文中的“必须”是互通要求；第 9 节明确列出的扩展机制尚未实现，不可假定旧客户端已支持。

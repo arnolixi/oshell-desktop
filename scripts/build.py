@@ -2,6 +2,7 @@
 """Build a native app locally; add --archive for GitHub Actions artifacts."""
 import argparse
 import os
+import os
 from pathlib import Path
 import platform
 import shutil
@@ -88,6 +89,8 @@ def build(target, output, archive=False, single_file=False):
                 # rebuild with those bytes embedded. Both outputs are clean
                 # temporary builds, never a user's portable data directory.
                 with embedded_resources(ROOT, stage / 'windows-amd64'):
+                    if os.environ.get('OSHELL_CI_TEST_BUNDLE') == '1':
+                        run('python3', 'scripts/ci-test-bundle.py', 'embedded')
                     if platform.system() == 'Windows':
                         run('go', 'test', '-count=1', '-timeout=60s', './internal/terminal',
                             '-run', '^TestSingleFileResourcesLoad$')
