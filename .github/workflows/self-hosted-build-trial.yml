@@ -1,0 +1,128 @@
+name: Self-hosted container build trial
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: self-hosted-build-trial
+  cancel-in-progress: false
+jobs:
+  package:
+    if: github.ref == 'refs/heads/main'
+    runs-on: [self-hosted, Linux, X64]
+    timeout-minutes: 60
+    steps:
+      - name: Verify selected Linux machine and Docker
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$RUNNER_NAME" = develop
+          printf 'Runner: %s\nCPU threads: %s\n' "$RUNNER_NAME" "$(nproc)" | tee -a "$GITHUB_STEP_SUMMARY"
+          free -h
+          docker version
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: false
+      - name: First container build of both platforms and Windows test binaries
+        shell: bash
+        run: |
+          set -euo pipefail
+          # Persist only this repository's compiler caches, outside checkout and job temp.
+          export OSHELL_CI_CACHE_DIR="$RUNNER_TOOL_CACHE/oshell-desktop-trial-cache"
+          started=$SECONDS
+          bash scripts/build-on-runner.sh package
+          printf 'First package build (including image preparation): %ss\n' "$((SECONDS-started))" | tee -a "$GITHUB_STEP_SUMMARY"
+      - name: Repeat the same container build with warm caches
+        shell: bash
+        run: |
+          set -euo pipefail
+          export OSHELL_CI_CACHE_DIR="$RUNNER_TOOL_CACHE/oshell-desktop-trial-cache"
+          export OSHELL_CI_IMAGE_READY=1
+          started=$SECONDS
+          bash scripts/build-on-runner.sh package
+          printf 'Warm package build: %ss\n' "$((SECONDS-started))" | tee -a "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: windows-tests
+          path: validation/windows-tests/*
+          if-no-files-found: error
+          retention-days: 7
+      - uses: actions/upload-artifact@v4
+        with:
+          name: oshell-windows-amd64
+          path: dist/OShell-Desktop-windows-amd64-single-file.zip
+          if-no-files-found: error
+          retention-days: 7
+      - uses: actions/upload-artifact@v4
+        with:
+          name: oshell-linux-amd64
+          path: dist/OShell-Desktop-linux-amd64.tar.gz
+          if-no-files-found: error
+          retention-days: 7
+      - name: Linux regression and PTY ZMODEM race tests in Docker
+        shell: bash
+        env:
+          OSHELL_CI_IMAGE_READY: '1'
+        run: |
+          set -euo pipefail
+          export OSHELL_CI_CACHE_DIR="$RUNNER_TOOL_CACHE/oshell-desktop-trial-cache"
+          started=$SECONDS
+          bash scripts/build-on-runner.sh linux
+          printf 'Linux regression: %ss\n' "$((SECONDS-started))" | tee -a "$GITHUB_STEP_SUMMARY"
+  windows:
+    needs: package
+    runs-on: [self-hosted, Windows, X64]
+    timeout-minutes: 25
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - name: Verify selected Windows machine and execution tools
+        shell: powershell
+        run: |
+          if ($env:RUNNER_NAME -ne 'LAPTOP-NGQ35G2T') { throw 'Unexpected Windows runner' }
+          Get-Command pwsh -ErrorAction Stop
+          "Runner: $env:RUNNER_NAME; CPU threads: $env:NUMBER_OF_PROCESSORS" | Out-File $env:GITHUB_STEP_SUMMARY -Append -Encoding utf8
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: actions/download-artifact@v4
+        with:
+          name: windows-tests
+          path: validation/windows-tests
+      - name: Prepare pinned Windows rz sz interoperability peer
+        run: |
+          $archive = Join-Path $env:RUNNER_TEMP 'lrzsz-peer.zip'
+          $destination = Join-Path $env:RUNNER_TEMP "lrzsz-peer-$env:GITHUB_RUN_ID-$env:GITHUB_RUN_ATTEMPT"
+          Invoke-WebRequest 'https://github.com/trzsz/lrzsz-win32/releases/download/v0.12.21rc/lrzsz_0.12.21rc_windows_x86_64.zip' -OutFile $archive
+          if ((Get-FileHash $archive -Algorithm SHA256).Hash -ne 'DACE2DB172B1B5A1E5998692760A75355B254E1826718D88BAE7FA3A6DE3C325') { throw 'lrzsz fixture checksum mismatch' }
+          Expand-Archive -LiteralPath $archive -DestinationPath $destination -Force
+          (Join-Path $destination 'lrzsz_0.12.21rc_windows_x86_64') | Out-File $env:GITHUB_PATH -Encoding utf8 -Append
+          'OSHELL_REQUIRE_LRZSZ=1' | Out-File $env:GITHUB_ENV -Encoding utf8 -Append
+      - name: Execute precompiled regression suite and PTY ZMODEM race tests
+        run: python scripts/ci-test-bundle.py windows
+      - uses: actions/download-artifact@v4
+        with:
+          name: oshell-windows-amd64
+          path: validation/container-package
+      - name: Verify single-file GUI and update preservation without compiling
+        run: |
+          $destination = "validation/container-package/extracted-$env:GITHUB_RUN_ID-$env:GITHUB_RUN_ATTEMPT"
+          Expand-Archive -LiteralPath 'validation/container-package/OShell-Desktop-windows-amd64-single-file.zip' -DestinationPath $destination -Force
+          $files = @(Get-ChildItem -LiteralPath $destination -File -Recurse)
+          if ($files.Count -ne 1 -or $files[0].Name -ne 'OShell Desktop.exe') { throw 'Expected exactly one portable EXE' }
+          ./scripts/test-update-package.ps1 -Executable $files[0].FullName -FixtureExecutable validation/windows-tests/update-fixture.exe
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: windows-update-smoke
+          path: validation/update-package-smoke.json
+          if-no-files-found: warn
+          retention-days: 7
