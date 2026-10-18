@@ -40,8 +40,11 @@ go run .
 ## GitHub Actions
 
 工作流 `.github/workflows/build.yml` 在 Windows 和 Linux 上运行全量回归（包含桌面与终端）、核心、PTY 与 ZMODEM 竞态检测、编译和静态检查。Linux 使用虚拟显示运行桌面回归。
-测试通过后生成 Windows amd64 单文件 ZIP 和 Linux amd64 tar.gz，
-从 Actions 页面的 Artifacts 下载，无需在本机保留兼容包。
+发布包统一在自托管 Linux x64 Runner `develop`（标签 `self-dev`）的 `ubuntu:24.04` 作业容器中编译，生成 Windows amd64 单文件 ZIP 和 Linux amd64 tar.gz。宿主机需安装 Docker，并允许 Runner 用户创建容器；Go、Python 和构建依赖在容器内准备。
+
+编译打包与原生回归并行，Windows 额外下载容器生成的 EXE，验证启动、DLL 自动释放、升级重启和配置保留。所有测试、打包与产物验证通过后才允许发布 Release。Artifacts 可能在测试结束前出现，下载时应确认整次工作流成功。
+
+只有 `main` 和 `v*` 标签触发自托管构建（也可对 `main` 手动运行）；PR 和其他分支只在 GitHub 托管机器上测试，不进入本地服务器。容器不挂载额外宿主机目录，不使用特权模式；任务结束后恢复工作区文件所有权，避免影响 Runner 后续检出。
 
 CI 使用统一入口：
 
@@ -55,7 +58,7 @@ python3 scripts/build.py --target linux/amd64 --archive
 Windows 单文件包内置便携模式，多文件包使用 `oshell-portable` 标记，配置、凭据等数据直接存放在 EXE 同级目录；
 便携模式忽略环境变量和旧的目录定位记录，移动时应复制整个程序文件夹。
 `--out` 指定输出目录。
-普通分支构建只生成 Artifacts；推送与应用版本一致的 `v*` 标签后，流水线发布 Windows / Linux 更新包及 SHA256SUMS.txt。
+`main` 构建只生成 Artifacts；推送与应用版本一致的 `v*` 标签后，流水线发布 Windows / Linux 更新包及 SHA256SUMS.txt。
 
 ## 功能与边界
 

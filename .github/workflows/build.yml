@@ -62,32 +62,49 @@ jobs:
       - name: Vet
         run: go vet ./...
   package:
-    needs: test
+    # Public pull requests must not execute code on the private build server.
+    # Build alongside regression tests; release still requires every check.
+    if: github.event_name != 'pull_request' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v'))
+    runs-on: [self-hosted, Linux, X64, self-dev]
+    timeout-minutes: 30
+    container:
+      image: ubuntu:24.04
+    defaults:
+      run:
+        shell: bash
+    env:
+      CGO_ENABLED: '0'
+      GOTOOLCHAIN: local
+      GOFLAGS: -mod=readonly
+      GOCACHE: /tmp/oshell-go-build
+      GOMODCACHE: /tmp/oshell-go-mod
     strategy:
       fail-fast: false
       matrix:
         include:
-          - runner: windows-latest
-            target: windows/amd64
+          - target: windows/amd64
             artifact: windows-amd64
             options: --single-file
-          - runner: ubuntu-24.04
-            target: linux/amd64
+          - target: linux/amd64
             artifact: linux-amd64
             options: ''
-    runs-on: ${{ matrix.runner }}
     steps:
+      - name: Prepare build container
+        run: |
+          test -f /.dockerenv
+          apt-get update
+          apt-get install -y --no-install-recommends ca-certificates git curl python3 unzip
+          printf 'Runner: %s\nTarget: %s\n' "$RUNNER_NAME" '${{ matrix.target }}'
+          cat /etc/os-release
       - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
       - uses: actions/setup-go@v5
         with:
           go-version-file: go.mod
-      - uses: actions/setup-python@v5
-        with:
-          python-version: '3.12'
-      - name: Package native application
-        env:
-          CGO_ENABLED: '0'
-        run: python scripts/build.py --target ${{ matrix.target }} ${{ matrix.options }} --archive
+          cache: false
+      - name: Package application in container
+        run: python3 scripts/build.py --target ${{ matrix.target }} ${{ matrix.options }} --archive
       - uses: actions/upload-artifact@v4
         with:
           name: oshell-${{ matrix.artifact }}
@@ -96,9 +113,36 @@ jobs:
             dist/*.tar.gz
           if-no-files-found: error
           retention-days: 7
+      - name: Restore workspace ownership for the host runner
+        if: always()
+        run: |
+          # Checkout/build run as container root; keep the next host checkout writable.
+          chown -R --no-dereference "$(stat -c '%u:%g' "$GITHUB_WORKSPACE")" "$GITHUB_WORKSPACE"
+  verify-windows-package:
+    needs: package
+    runs-on: windows-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - uses: actions/download-artifact@v4
+        with:
+          name: oshell-windows-amd64
+          path: validation/container-package
+      - name: Verify cross-compiled single-file application and update preservation
+        shell: pwsh
+        run: |
+          Expand-Archive -LiteralPath 'validation/container-package/OShell-Desktop-windows-amd64-single-file.zip' -DestinationPath 'validation/container-package/extracted'
+          $files = @(Get-ChildItem -LiteralPath 'validation/container-package/extracted' -File -Recurse)
+          if ($files.Count -ne 1 -or $files[0].Name -ne 'OShell Desktop.exe') {
+            throw 'Expected exactly one portable EXE in the Windows archive'
+          }
+          ./scripts/test-update-package.ps1 -Executable $files[0].FullName
   release:
     if: startsWith(github.ref, 'refs/tags/v')
-    needs: package
+    needs: [test, package, verify-windows-package]
     runs-on: ubuntu-24.04
     permissions:
       contents: write
