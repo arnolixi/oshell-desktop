@@ -46,11 +46,14 @@ import (
 
 // Options configure a terminal.
 type Options struct {
-	LocalToolsOnExit bool
-	OnSessionEnd     func()
-	OnShellIdentity  func(core.HostIdentity)
-	OnDirectory      func(string)
-	PreferColorEmoji bool
+	CustomWordSelection bool
+	WordSeparators      string
+	ShiftWhitespace     bool
+	LocalToolsOnExit    bool
+	OnSessionEnd        func()
+	OnShellIdentity     func(core.HostIdentity)
+	OnDirectory         func(string)
+	PreferColorEmoji    bool
 	// App-managed shortcuts suppress the widget default accelerators.
 	ManagedClipboardBindings   bool
 	AmbiguousCharactersAreWide bool

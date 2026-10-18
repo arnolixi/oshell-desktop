@@ -75,6 +75,9 @@ func (a *App) view(c *ui.Context) {
 			}
 		}
 		ui.Row(c.Key("workspace-content")).Grow(1).MinHeight(0).AlignItems(ui.Stretch).Children(func() {
+			if a.localUI.SidebarVisible && !a.focusFullscreen.chrome {
+				a.sidebarView(c.Key("session-sidebar"))
+			}
 			a.groupWorkspace(c, a.groups.root)
 			if t := a.activeTab(); a.filesVisible && t != nil && t.active.term != nil {
 				a.filesView(c, t.active)
@@ -238,6 +241,7 @@ func (a *App) legacyToolbar(c *ui.Context) {
 		toolButton(c, "记录终端日志", nil, logLabel).Disabled(a.activePane() == nil || a.activePane().term == nil).OnClick(a.toggleLog)
 		toolButton(c, "远程文件", folderIcon, "文件").Disabled(a.activePane() == nil || a.activePane().conn == nil).OnClick(a.toggleFiles)
 		toolButton(c, "设置", settingsIcon, "").OnClick(func() { a.openSettings() })
+		toolButton(c, "会话侧栏", sidebarIcon, "").OnClick(a.toggleSidebar)
 	}).Height(38).Padding(6, 8).Gap(5).Background(c.Theme().Background).BorderWidth(0, 0, 1, 0).BorderColor(c.Theme().Border).Label("主工具栏")
 }
 func (a *App) toggleFiles() {

@@ -1,6 +1,9 @@
 package vt
 
-import "unsafe"
+import (
+	"runtime"
+	"unsafe"
+)
 
 // Selection gesture events, options and data (GhosttySelectionGesture*).
 const (
@@ -14,6 +17,7 @@ const (
 	gestureOptRepeatDistance = 2
 	gestureOptTime           = 3
 	gestureOptRepeatInterval = 4
+	gestureOptWordBoundaries = 5
 	gestureOptRectangle      = 7
 	gestureOptGeometry       = 8
 	gestureOptViewport       = 9
@@ -29,6 +33,24 @@ const (
 type Gesture struct {
 	h                          uintptr
 	press, release, drag, tick uintptr
+}
+
+// Ghostty copies the codepoints into each reusable event. Keep identical word
+// boundaries for press, drag and autoscroll so expansion preserves soft wraps.
+func (g *Gesture) SetWordBoundaries(text string) {
+	runes := []rune(text)
+	data := make([]uint32, max(1, len(runes)))
+	for i, r := range runes {
+		data[i] = uint32(r)
+	}
+	points := struct {
+		ptr *uint32
+		len uintptr
+	}{&data[0], uintptr(len(runes))}
+	for _, event := range []uintptr{g.press, g.drag, g.tick} {
+		call(fnGestureEventSet, event, gestureOptWordBoundaries, uintptr(unsafe.Pointer(&points)))
+	}
+	runtime.KeepAlive(data)
 }
 
 // Geometry is the grid in pixels, for drags.

@@ -26,6 +26,7 @@ try {
     if (-not $taskInitial.WaitForExit(5000)) { $taskInitial.Kill(); $taskInitial.WaitForExit() }
     # Extra sentinel data must survive byte-for-byte, even if unknown to the app.
     [IO.File]::WriteAllText((Join-Path $taskApp 'known_hosts'), '# synthetic test sentinel')
+    [IO.File]::WriteAllText((Join-Path $taskApp 'desktop-preferences.json'), '{"sidebarVisible":false,"wordSeparators":"/: ","shiftWhitespace":true}', [Text.UTF8Encoding]::new($false))
     $taskBefore = @{}
     Get-ChildItem -LiteralPath $taskApp -File -Recurse -Force | Where-Object { $_.Name -ne 'OShell Desktop.exe' -and $_.Name -ne '.oshell-state.lock' } | ForEach-Object {
         $taskBefore[[IO.Path]::GetRelativePath($taskApp,$_.FullName)] = (Get-FileHash -LiteralPath $_.FullName -Algorithm SHA256).Hash

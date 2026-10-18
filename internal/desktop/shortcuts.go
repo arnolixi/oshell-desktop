@@ -82,6 +82,11 @@ func (a *App) shortcuts(c *ui.Context) {
 	if a.settingsOpen || a.modalActive() {
 		return
 	}
+	key := a.localUI.SidebarShortcut
+	if key.Valid() && a.config.Settings.KeyboardShortcuts.Conflict(key, "", runtime.GOOS) == "" && c.Shortcut(shortcutMods(key), shortcutKey(key.KeyCode)) {
+		a.toggleSidebar()
+		return
+	}
 	p := a.activePane()
 	terminalFocused := p != nil && p.term != nil && (p.focus.FocusWithin(c) || c.Resolve(p.focus).FocusWithin())
 	for _, action := range core.ShortcutActions {
@@ -437,6 +442,7 @@ func (h *applicationHub) menuItems() []*mygo.MenuItem {
 
 	appMenu.Submenu = append(appMenu.Submenu, h.workspaceMenuItem(h.updateMenuLabel(), func(a *App) { a.invokeUpdater() }), mygo.Separator(), item("quit"))
 	viewMenu := menu("视图", "focusFullscreen", "-", "splitVertical", "splitHorizontal", "zoomPane", "nextPane", "previousPane", "-", "nextTab", "previousTab", "recentTab", "tabNumber", "tab1", "tab2", "tab3", "tab4", "tab5", "tab6", "tab7", "tab8", "tab9", "-", "newGroup", "showGroups", "arrangeTabs", "arrangeHorizontal", "arrangeVertical", "arrangeTiled")
+	viewMenu.Submenu = append(viewMenu.Submenu, h.workspaceMenuItem("显示/隐藏会话侧栏", func(a *App) { a.toggleSidebar() }))
 	viewMenu.Submenu = append(viewMenu.Submenu, h.workspaceMenuItem("刷新标题识别", func(a *App) { a.refreshActiveHostFromMenu() }))
 	return []*mygo.MenuItem{
 		appMenu,

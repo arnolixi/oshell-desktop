@@ -22,7 +22,7 @@ func TestUnifiedHeaderFitsMinimumWindowAndRoutesMenus(t *testing.T) {
 		if !ok || header.H != 38 {
 			t.Fatalf("unexpected header: %+v", header)
 		}
-		for _, label := range []string{"OShell", "会话", "快捷连接", "编辑", "视图", "窗口", "快速命令", "工具", "标签组", "排列", "会话管理", "文件管理"} {
+		for _, label := range []string{"OShell", "会话", "快捷连接", "编辑", "视图", "窗口", "快速命令", "工具", "标签组", "排列", "会话管理", "文件管理", "会话侧栏", "设置"} {
 			r, ok := tt.Find(label)
 			if !ok || r.X < 0 || r.X+r.W > 880 || r.Y < header.Y || r.Y+r.H > header.Y+header.H {
 				t.Fatalf("header entry %q clipped: %+v", label, r)

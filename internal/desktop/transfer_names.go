@@ -7,6 +7,7 @@ import (
 	"oshell-desktop/internal/core"
 	"path"
 	"path/filepath"
+	"strings"
 )
 
 func uniqueTransferName(name string, existing map[string]bool) string {
@@ -26,6 +27,7 @@ func uploadUnique(ctx context.Context, client core.RemoteFileSystem, paths []str
 	for _, entry := range entries {
 		names[entry.Name()] = true
 	}
+	var plans []transferPlan
 	for _, source := range paths {
 		if err := ctx.Err(); err != nil {
 			return err
@@ -35,7 +37,52 @@ func uploadUnique(ctx context.Context, client core.RemoteFileSystem, paths []str
 			return fmt.Errorf("文件名包含不支持的字符")
 		}
 		target := path.Join(directory, uniqueTransferName(name, names))
-		if err := client.Upload(ctx, source, target, progress); err != nil {
+		plans = append(plans, transferPlan{source, target, true})
+	}
+	if recorder, ok := client.(*recordedFileSystem); ok {
+		recorder.prepare(plans)
+	}
+	for _, p := range plans {
+		if err := client.Upload(ctx, p.source, p.target, progress); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+func downloadBatch(ctx context.Context, client core.RemoteFileSystem, names []string, remoteDirectory, localDirectory string, progress func(core.TransferProgress)) error {
+	var plans []transferPlan
+	reserved := map[string]bool{}
+	for _, name := range names {
+		if !core.SafeTransferName(name) {
+			return fmt.Errorf("远程文件名无效")
+		}
+		candidate := name
+		for i := 0; ; i++ {
+			if i > 0 {
+				candidate = fmt.Sprintf("%s.%d", name, i)
+			}
+			target, err := uniqueLocalTransferPath(localDirectory, candidate)
+			if err != nil {
+				return err
+			}
+			// Reserve case-insensitively to keep a batch portable across filesystems.
+			key := strings.ToLower(target)
+			if reserved[key] {
+				continue
+			}
+			reserved[key] = true
+			plans = append(plans, transferPlan{path.Join(remoteDirectory, name), target, false})
+			break
+		}
+	}
+	if recorder, ok := client.(*recordedFileSystem); ok {
+		recorder.prepare(plans)
+	}
+	for _, p := range plans {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		if err := client.Download(ctx, p.source, p.target, false, progress); err != nil {
 			return err
 		}
 	}

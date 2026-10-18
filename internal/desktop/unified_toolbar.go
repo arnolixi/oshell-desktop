@@ -10,7 +10,7 @@ import (
 )
 
 func (a *App) toolbar(c *ui.Context) {
-	if runtime.GOOS != "windows" {
+	if runtime.GOOS == "darwin" {
 		a.legacyToolbar(c)
 		return
 	}
@@ -38,8 +38,11 @@ func (a *App) toolbar(c *ui.Context) {
 		ui.MenuButton(c, "排列", a.headerArrangementMenu).Height(25).Disabled(len(a.tabs) == 0)
 		ui.Spacer(c)
 		ui.Box(c).Width(1).Height(18).Background(c.Theme().Border)
-		toolButton(c, "会话管理", terminalIcon, "会话管理").Shrink(0).OnClick(func() { a.performAction("sessionManager") })
-		toolButton(c, "文件管理", folderIcon, "文件管理").Shrink(0).OnClick(func() { a.performAction("fileManager") })
+		toolButton(c, "会话管理", terminalIcon, "").Shrink(0).OnClick(func() { a.performAction("sessionManager") })
+		toolButton(c, "文件管理", folderIcon, "").Shrink(0).OnClick(func() { a.performAction("fileManager") })
+		toolButton(c, "会话侧栏", sidebarIcon, "").Shrink(0).OnClick(a.toggleSidebar)
+		toolButton(c, "设置", settingsIcon, "").Shrink(0).OnClick(func() { a.performAction("settings") })
+		a.updateToolbar(c)
 	}).Height(38).Padding(6, 8).Gap(5).Background(c.Theme().Background).BorderWidth(0, 0, 1, 0).BorderColor(c.Theme().Border).Label("主工具栏")
 }
 

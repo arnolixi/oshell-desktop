@@ -64,6 +64,12 @@ func (t *Terminal) SetInputPolicy(copyOnSelect, rightPaste, trimLeading, trimTra
 	t.opts.TrimCopyTrailing = trimTrailing
 }
 
+func (t *Terminal) SetSelectionPolicy(separators string, shiftWhitespace bool) {
+	t.opts.CustomWordSelection = true
+	t.opts.WordSeparators = separators
+	t.opts.ShiftWhitespace = shiftWhitespace
+}
+
 func (t *Terminal) observeOutput(b []byte) {
 	t.logMu.Lock()
 	if t.logFile != nil {

@@ -66,6 +66,7 @@ func savedConnectionFixture(t *testing.T, configure ...func(*ssh.ServerConfig, s
 	server.AddHostKey(signer)
 	fileHandlers := sftp.InMemHandler()
 	fileHandlers.FileGet = isolatedSFTPReadHandles{fileHandlers.FileGet}
+	fileHandlers.FilePut = isolatedSFTPWriteHandles{fileHandlers.FilePut}
 	if err := fileHandlers.FileCmd.Filecmd(sftp.NewRequest("Mkdir", "/fixture-folder")); err != nil {
 		t.Fatal(err)
 	}
@@ -401,4 +402,23 @@ func (h isolatedSFTPReadHandles) Fileread(request *sftp.Request) (io.ReaderAt, e
 		return nil, err
 	}
 	return struct{ io.ReaderAt }{reader}, nil
+}
+
+// Read/write handles need the same isolation: cancellation of an upload must
+// not persist an EOF on the in-memory inode and poison a later resume.
+type isolatedSFTPWriteHandles struct{ sftp.FileWriter }
+
+func (h isolatedSFTPWriteHandles) Filewrite(r *sftp.Request) (io.WriterAt, error) {
+	writer, err := h.FileWriter.Filewrite(r)
+	if err != nil {
+		return nil, err
+	}
+	return struct{ io.WriterAt }{writer}, nil
+}
+func (h isolatedSFTPWriteHandles) OpenFile(r *sftp.Request) (sftp.WriterAtReaderAt, error) {
+	file, err := h.FileWriter.(sftp.OpenFileWriter).OpenFile(r)
+	if err != nil {
+		return nil, err
+	}
+	return struct{ sftp.WriterAtReaderAt }{file}, nil
 }

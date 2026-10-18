@@ -3,7 +3,6 @@ package desktop
 import (
 	"github.com/egoist/mygo/ui"
 	"oshell-desktop/internal/core"
-	"strings"
 	"testing"
 	"time"
 )
@@ -75,15 +74,18 @@ func TestSavedSFTPConnectsAndManagesDirectories(t *testing.T) {
 	if err := tt.Click("重新连接"); err != nil {
 		t.Fatal(err)
 	}
-	if a.activePane() != pane || accepted.Load() != 1 || !strings.Contains(a.status, "无法复用") {
-		t.Fatal("failed shared transport reauthenticated silently")
+	waitOperator(t, a, func() bool {
+		return a.activePane() != pane && a.activePane().files != nil && !a.activePane().files.busy && a.activePane().files.client != nil
+	})
+	if len(a.tabs) != 1 || accepted.Load() != 2 || a.activePane().files.dir != "/native-renamed" {
+		t.Fatal("explicit reconnect lost file tab or directory")
 	}
 	// A deliberate new-session action may establish a fresh authentication.
 	a.request(p, 0)
 	waitOperator(t, a, func() bool {
 		return len(a.tabs) == 2 && a.activePane() != pane && a.activePane().files != nil && !a.activePane().files.busy && len(a.activePane().files.entries) == 2
 	})
-	if accepted.Load() != 2 {
+	if accepted.Load() != 3 {
 		t.Fatal("explicit new session did not authenticate")
 	}
 

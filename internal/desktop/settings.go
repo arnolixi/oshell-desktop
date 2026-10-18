@@ -14,6 +14,8 @@ import (
 )
 
 func (a *App) prepareSettings() {
+	a.localUIDraft = a.localUI
+	a.sidebar.capture = false
 	a.features.sharedSync.logList = ui.ListState{}
 	a.features.sharedSync.conflictList = ui.ListState{}
 	a.features.sharedSync.conflictDetailKey = ""
@@ -167,6 +169,10 @@ func (a *App) applySettings() {
 		f.settingsError = e.Error()
 		return
 	}
+	if conflict := f.settingsDraft.KeyboardShortcuts.Conflict(a.localUIDraft.SidebarShortcut, "", runtime.GOOS); conflict != "" {
+		f.settingsError = "侧栏快捷键与 " + conflict + " 冲突"
+		return
+	}
 	lines, e := strconv.Atoi(f.settingsLines)
 	if e != nil || lines < 500 || lines > 100000 {
 		f.settingsError = "历史行数范围为 500–100000"
@@ -180,6 +186,9 @@ func (a *App) applySettings() {
 	f.settingsDraft.Dark = f.settingsDraft.InterfaceTheme == "dark"
 	apply := func() {
 		if a.changeConfig(func(cfg *core.Config) error { cfg.Settings = f.settingsDraft; return nil }) {
+			if !a.saveLocalPreferences(a.localUIDraft) {
+				return
+			}
 			a.applyAppearance()
 			a.applySyncDraft(func() {
 				if a.applyStorageSettings() {
@@ -201,7 +210,13 @@ func (a *App) applySettings() {
 }
 func (a *App) settingsView(c *ui.Context) {
 	a.drain()
-	if auxiliaryEscape(c, a.closeSettings) {
+	if auxiliaryEscape(c, func() {
+		if a.sidebar.capture {
+			a.sidebar.capture = false
+		} else {
+			a.closeSettings()
+		}
+	}) {
 		return
 	}
 	a.themeSettings(c, a.features.settingsDraft)
@@ -217,7 +232,7 @@ func (a *App) settingsView(c *ui.Context) {
 	f := &a.features
 	s := &f.settingsDraft
 	ui.Column(c).Fill().Padding(16).Gap(12).Children(func() {
-		ui.Tabs(c, &f.settingsTab, "常规", "主题与配色", "快捷键", "同步", "更新", "关于", "存储", "时钟")
+		ui.Tabs(c, &f.settingsTab, "常规", "主题与配色", "快捷键", "同步", "更新", "关于", "存储", "时钟", "选择与侧栏")
 		ui.Scroll(c).Grow(1).MinHeight(0).Gap(12).Children(func() {
 			switch f.settingsTab {
 			case 0:
@@ -245,11 +260,8 @@ func (a *App) settingsView(c *ui.Context) {
 				ui.Checkbox(c, &s.AmbiguousCharactersAreWide, "将歧义宽度字符视为双宽（新建连接生效）")
 				ui.Divider(c)
 
-				ui.Text(c, "输入与复制").Bold()
-				ui.Checkbox(c, &s.Input.CopyOnSelect, "选中即复制")
+				ui.Text(c, "输入与粘贴").Bold()
 				ui.Checkbox(c, &s.Input.RightClickPaste, "右键粘贴；Shift+右键保留终端菜单")
-				ui.Checkbox(c, &s.Input.TrimLeading, "复制时清理选区头部空白")
-				ui.Checkbox(c, &s.Input.TrimTrailing, "复制时清理选区尾部空白")
 				ui.Checkbox(c, &s.Input.ConfirmMultiline, "多行粘贴前预览")
 				ui.Checkbox(c, &s.AutoZmodem, "自动识别 ZMODEM 上传和下载")
 				ui.Button(c, "密码保护…").OnClick(func() { a.closeSettings(); a.showVault() })
@@ -274,6 +286,8 @@ func (a *App) settingsView(c *ui.Context) {
 				a.storageSettings(c)
 			case 7:
 				a.clockSettings(c)
+			case 8:
+				a.localSelectionSettings(c)
 			}
 		})
 		if f.settingsError != "" {

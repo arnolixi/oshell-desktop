@@ -1,6 +1,6 @@
 # OShell Desktop
 
-Go 共用核心、mygo 原生 UI 和 Ghostty VT 终端实现，功能参考 macOS OShell 0.2.74。
+Go 共用核心、mygo 原生 UI 和 Ghostty VT 终端实现，对齐 macOS OShell 0.2.74～0.2.76 的跨平台功能，详见[功能对齐与使用边界](docs/oshell-0.2.76-parity.md)。
 当前构建、测试和打包目标为 Windows amd64 和 Linux amd64，不构建 macOS 版本。
 本项目不替换原 Swift OShell，数据目录相互独立。
 
@@ -55,7 +55,7 @@ python3 scripts/build.py --target linux/amd64 --archive
 Windows 单文件包内置便携模式，多文件包使用 `oshell-portable` 标记，配置、凭据等数据直接存放在 EXE 同级目录；
 便携模式忽略环境变量和旧的目录定位记录，移动时应复制整个程序文件夹。
 `--out` 指定输出目录。
-当前流水线不会上传 Release 或配置生产更新签名密钥。
+普通分支构建只生成 Artifacts；推送与应用版本一致的 `v*` 标签后，流水线发布 Windows / Linux 更新包及 SHA256SUMS.txt。
 
 ## 功能与边界
 

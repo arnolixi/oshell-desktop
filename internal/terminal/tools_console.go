@@ -2,10 +2,7 @@
 package terminal
 
 import (
-	"bytes"
-	"errors"
 	"fmt"
-	"golang.org/x/term"
 	"io"
 	"os"
 	"oshell-desktop/internal/core"
@@ -15,21 +12,15 @@ import (
 	"sync/atomic"
 )
 
-type consoleRW struct {
-	io.Reader
-	io.Writer
-}
 type ToolsConsole struct {
 	mu           sync.Mutex
 	process      *pty.PTY
 	processName  string
 	starting     bool
 	stateChanged func()
-	input        *io.PipeWriter
-	inputReader  *io.PipeReader
 	output       *io.PipeReader
 	writer       *io.PipeWriter
-	editor       *term.Terminal
+	editor       *promptEditor
 	cols, rows   int
 	closed       bool
 	once         sync.Once
@@ -38,9 +29,8 @@ type ToolsConsole struct {
 
 func NewToolsConsole() *ToolsConsole {
 	c := &ToolsConsole{cols: 80, rows: 24}
-	c.inputReader, c.input = io.Pipe()
 	c.output, c.writer = io.Pipe()
-	c.editor = term.NewTerminal(consoleRW{c.inputReader, c.writer}, "oshell> ")
+	c.editor = newPromptEditor(c.writer)
 	c.managed.Store(true)
 	go c.run()
 	return c
@@ -56,8 +46,7 @@ func (c *ToolsConsole) Write(b []byte) (int, error) {
 	if p != nil {
 		return p.Write(b)
 	}
-	input := bytes.ReplaceAll(b, []byte{3}, []byte{21, 13})
-	if _, e := c.input.Write(input); e != nil {
+	if _, e := c.editor.Write(b); e != nil {
 		return 0, e
 	}
 	return len(b), nil
@@ -80,8 +69,7 @@ func (c *ToolsConsole) Close() error {
 		p := c.process
 		c.mu.Unlock()
 		c.managed.Store(false)
-		c.input.Close()
-		c.inputReader.Close()
+		c.editor.Close()
 		c.writer.Close()
 		c.output.Close()
 		if p != nil {
@@ -96,7 +84,7 @@ func (c *ToolsConsole) run() {
 	for {
 		c.editor.SetBracketedPasteMode(true)
 		line, e := c.editor.ReadLine()
-		if e != nil && !errors.Is(e, term.ErrPasteIndicator) {
+		if e != nil {
 			return
 		}
 		line = strings.TrimSpace(line)
@@ -117,7 +105,10 @@ func (c *ToolsConsole) run() {
 			io.WriteString(c.writer, e.Error()+"\r\n")
 			continue
 		}
+		c.editor.suspend()
 		c.editor.SetBracketedPasteMode(false)
+		// Bytes following an external command belong to its interactive phase,
+		// never to the next local prompt or its history.
 		c.mu.Lock()
 		if c.closed {
 			c.mu.Unlock()

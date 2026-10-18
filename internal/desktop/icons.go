@@ -10,6 +10,7 @@ func glyph(body string) *ui.SVG {
 
 var (
 	folderIcon   = glyph(`<path d="M2.5 5h5l1.5 2h8.5v9h-15z"/><path d="M2.5 5V3.5h5l1.5 2h7v1.5"/>`)
+	sidebarIcon  = glyph(`<rect x="2" y="3" width="16" height="14" rx="2"/><path d="M7 3v14M4 6h1m-1 3h1m-1 3h1"/>`)
 	terminalIcon = glyph(`<rect x="2" y="3.5" width="16" height="13" rx="2"/><path d="m5 7 3 3-3 3m5 0h4"/>`)
 	plusIcon     = glyph(`<path d="M10 4v12M4 10h12"/>`)
 	closeIcon    = glyph(`<path d="m6 6 8 8m0-8-8 8"/>`)

@@ -34,7 +34,12 @@ func (a *App) reconnectFTPFiles(p *pane) {
 			}()
 		}
 	}
-	p.files = &fileState{dir: directory, input: directory, filter: filter}
+	next := reconnectFileState(p.files)
+	if next == nil {
+		next = &fileState{}
+	}
+	next.dir, next.input, next.filter = directory, directory, filter
+	p.files = next
 	p.status = "正在重新连接 FTP…"
 	a.loadFiles(p, directory)
 }

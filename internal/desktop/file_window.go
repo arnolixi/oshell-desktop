@@ -67,9 +67,13 @@ func (h *applicationHub) externalFileWindow() *App {
 }
 func (a *App) fileWindowView(c *ui.Context) {
 	a.drain()
-	if auxiliaryEscape(c, func() {
+	if !a.modalActive() && c.Shortcut(ui.Ctrl, ui.KeyW) && a.win != nil {
+		a.win.Close()
+		return
+	}
+	if !a.modalActive() && auxiliaryEscape(c, func() {
 		if a.win != nil {
-			a.win.Close()
+			a.win.Minimize()
 		}
 	}) {
 		return
@@ -95,8 +99,16 @@ func (a *App) fileWindowView(c *ui.Context) {
 			})
 			ui.Button(c, "复制文件标签").Disabled(a.activePane() == nil).OnClick(a.duplicateFileSession)
 			ui.Button(c, "重连").Disabled(a.activePane() == nil).OnClick(a.reconnectActive)
+			ui.Spacer(c)
+			toolButton(c, "设置", settingsIcon, "设置").OnClick(a.openSettings)
 		})
-		ui.ScrollHorizontal(c).Height(38).BorderWidth(0, 0, 1, 0).BorderColor(c.Theme().Border).Children(func() {
+		a.ensureGroups()
+		g := a.groupByID(a.groups.active)
+		if g == nil {
+			g = a.groups.root.leaves()[0]
+		}
+		g.dragOver = false
+		scroll := ui.ScrollHorizontal(c).TrackScroll(&g.scroll).Height(38).BorderWidth(0, 0, 1, 0).BorderColor(c.Theme().Border).Children(func() {
 			ui.Row(c).Gap(4).Children(func() {
 				for _, tab := range a.tabs {
 					selected := tab == a.activeTab()
@@ -108,8 +120,25 @@ func (a *App) fileWindowView(c *ui.Context) {
 					if selected {
 						background, underline = c.Theme().Selection, c.Theme().Accent
 					}
-					ui.Row(c.Key(tab.id)).Height(37).Gap(2).Padding(2, 3).Background(background).BorderWidth(0, 0, 3, 0).BorderColor(underline).Label("文件标签 " + tab.id).Children(func() {
-						button := ui.Button(c, title).Role(ui.RoleTab).Selected(selected).Background(ui.Transparent).TextColor(c.Theme().Text).BorderWidth(0).Tooltip(fileTabDescription(tab) + "\n双击已连接的会话可新建相同文件标签")
+					row := ui.Row(c.Key(tab.id)).Height(37).Gap(2).Padding(2, 3).Background(background).BorderWidth(0, 0, 3, 0).BorderColor(underline).Label("文件标签 " + tab.id)
+					if _, over := ui.DragOver[tabDrag](row); over {
+						g.dragOver = true
+						x, _, _ := row.PointerPosition()
+						if x < row.Bounds().W/2 {
+							row.BorderWidth(0, 0, 3, 2)
+						} else {
+							row.BorderWidth(0, 2, 3, 0)
+						}
+						row.BorderColor(c.Theme().Accent)
+					}
+					if drag, dropped := ui.Drop[tabDrag](row); dropped {
+						x, _, _ := row.PointerPosition()
+						after := x >= row.Bounds().W/2
+						target := tab.id
+						a.post(func() { a.moveTabRelative(drag.ID, target, after) })
+					}
+					row.Children(func() {
+						button := ui.Button(c, title).Role(ui.RoleTab).Selected(selected).Background(ui.Transparent).TextColor(c.Theme().Text).BorderWidth(0).Tooltip(fileTabDescription(tab) + "\n双击已连接的会话可新建相同文件标签").Drag(tabDrag{tab.id})
 						if selected {
 							button.FontWeight(600)
 						}
@@ -119,6 +148,7 @@ func (a *App) fileWindowView(c *ui.Context) {
 				}
 			})
 		})
+		a.tabDragScroll(c, scroll, g)
 		if p := a.activePane(); p != nil {
 			current := "当前会话：" + fileTabDescription(a.activeTab())
 			ui.Text(c, current).SingleLine().Tooltip(current).FontWeight(600).Padding(6, 10).FillWidth().MinWidth(0)
@@ -231,10 +261,20 @@ func (a *App) reopenSSHFileSession(p *pane, replace bool) {
 		return
 	}
 	if p.conn == nil || !p.conn.Alive() {
-		a.status = "原 SSH 连接已失效，无法复用。请从新会话入口重新连接。"
-		if p.files != nil {
-			p.files.status = a.status
+		if !replace {
+			a.status = "原 SSH 连接已失效，无法复用。请先重新连接。"
+			return
 		}
+		profile := p.profile
+		if p.files != nil {
+			profile.InitialDirectory = p.files.dir
+		}
+		split := 0
+		if replace {
+			a.features.reconnectTarget = p
+			split = -1
+		}
+		a.request(profile, split)
 		return
 	}
 	profile := p.profile

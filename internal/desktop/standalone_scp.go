@@ -5,10 +5,8 @@ import (
 	"fmt"
 	"github.com/egoist/mygo"
 	"github.com/egoist/mygo/ui"
-	"os"
 	"oshell-desktop/internal/core"
 	"path"
-	"path/filepath"
 	"strings"
 )
 
@@ -16,6 +14,26 @@ type standaloneSCPDraft struct {
 	open        bool
 	pane        *pane
 	remote, err string
+}
+
+// This adapter deliberately does not preflight via SFTP: this entry point is
+// also used by servers which have no SFTP subsystem.
+type standaloneSCPFileSystem struct {
+	core.RemoteFileSystem
+	connection *core.Connection
+}
+
+func (f *standaloneSCPFileSystem) Upload(ctx context.Context, source, target string, p func(core.TransferProgress)) error {
+	if f.connection == nil || !f.connection.Alive() {
+		return fmt.Errorf("SSH 连接已断开")
+	}
+	return f.connection.SCPUpload(ctx, source, target, p)
+}
+func (f *standaloneSCPFileSystem) Download(ctx context.Context, source, target string, replace bool, p func(core.TransferProgress)) error {
+	if f.connection == nil || !f.connection.Alive() {
+		return fmt.Errorf("SSH 连接已断开")
+	}
+	return f.connection.SCPDownload(ctx, source, target, replace, p)
 }
 
 func (a *App) openStandaloneSCP(p *pane) {
@@ -42,7 +60,12 @@ func (a *App) standaloneSCPDialog(c *ui.Context) {
 		}
 		a.features.scpDraft = nil
 		connection := p.conn
+		bindTransferIdentity(p.files, connection.Identity)
+		records := p.files.records
 		a.withFileOperation(p, p.files.client != nil, func(ctx context.Context) error {
+			task, _ := ctx.Value(fileTransferContextKey{}).(*fileTransfer)
+			client := &recordedFileSystem{RemoteFileSystem: &standaloneSCPFileSystem{connection: connection}, log: records, task: task, protocol: "SCP"}
+			defer client.finish()
 			if upload {
 				paths, err := chooseUploadItems(a.win, false)
 				if err != nil {
@@ -54,7 +77,7 @@ func (a *App) standaloneSCPDialog(c *ui.Context) {
 				if len(paths) != 1 {
 					return fmt.Errorf("独立 SCP 每次请选择一个文件或目录")
 				}
-				return connection.SCPUpload(ctx, paths[0], remote, a.transferProgress(p, ctx))
+				return client.Upload(ctx, paths[0], remote, a.transferProgress(p, ctx))
 			}
 			directories, err := mygo.Dialog.Open(mygo.OpenDialogOptions{Parent: a.win, Title: "选择 SCP 下载保存目录", Directory: true})
 			if err != nil {
@@ -63,16 +86,11 @@ func (a *App) standaloneSCPDialog(c *ui.Context) {
 			if len(directories) == 0 {
 				return context.Canceled
 			}
-			entries, err := os.ReadDir(directories[0])
+			target, err := uniqueLocalTransferPath(directories[0], path.Base(remote))
 			if err != nil {
 				return err
 			}
-			names := map[string]bool{}
-			for _, entry := range entries {
-				names[entry.Name()] = true
-			}
-			target := filepath.Join(directories[0], uniqueTransferName(path.Base(remote), names))
-			return connection.SCPDownload(ctx, remote, target, false, a.transferProgress(p, ctx))
+			return client.Download(ctx, remote, target, false, a.transferProgress(p, ctx))
 		})
 	}
 	ui.Modal(c.Key("standalone-scp"), &draft.open, func() {

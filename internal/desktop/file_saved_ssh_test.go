@@ -1,9 +1,6 @@
 package desktop
 
-import (
-	"strings"
-	"testing"
-)
+import "testing"
 
 func TestFileWindowOpensSavedSSHWithoutChangingCredentialIdentity(t *testing.T) {
 	a, profile, accepted := savedConnectionFixture(t)
@@ -44,9 +41,16 @@ func TestFileWindowOpensSavedSSHWithoutChangingCredentialIdentity(t *testing.T) 
 	}
 	a.tabs[1].active.conn.Close()
 	previous := a.activePane()
+	a.duplicateFileSession()
+	if a.activePane() != previous || len(a.tabs) != 2 || accepted.Load() != 1 {
+		t.Fatal("duplicating a dead transport reauthenticated")
+	}
 	a.reconnectActive()
-	if a.activePane() != previous || a.authOpen || accepted.Load() != 1 || !strings.Contains(a.status, "无法复用") {
-		t.Fatal("dead shared connection silently reauthenticated", a.status)
+	waitOperator(t, a, func() bool {
+		return a.activePane() != previous && a.activePane().files != nil && !a.activePane().files.busy && a.activePane().files.client != nil
+	})
+	if len(a.tabs) != 2 || a.authOpen || accepted.Load() != 2 || a.activePane().profile.Identity() != profile.Identity() {
+		t.Fatal("explicit reconnect lost identity or duplicated tab")
 	}
 
 }

@@ -11,6 +11,7 @@ import (
 	"oshell-desktop/internal/core"
 	"path"
 	"sort"
+	"sync/atomic"
 	"time"
 
 	"github.com/egoist/mygo"
@@ -18,6 +19,7 @@ import (
 )
 
 type fileTransfer struct {
+	pause        atomic.Bool
 	lastProgress time.Time
 	lastBytes    int64
 	refresh      bool
@@ -27,6 +29,10 @@ type fileTransfer struct {
 type fileTransferContextKey struct{}
 
 type fileState struct {
+	records                      *transferLog
+	recordsOpen                  bool
+	recordDetail                 string
+	recordList                   ui.ListState
 	rateOpen                     bool
 	rateUnit                     string
 	limiter                      core.TransferLimiter
@@ -81,6 +87,9 @@ func (a *App) readFiles(p *pane, dir string, notice *fileReadNotice) {
 	f := p.files
 	if f.busy {
 		return
+	}
+	if p.conn != nil {
+		bindTransferIdentity(f, p.conn.Identity)
 	}
 	dir = resolveRemoteDirectory(f.dir, dir)
 	f.busy = true
@@ -221,6 +230,9 @@ func (a *App) readFiles(p *pane, dir string, notice *fileReadNotice) {
 			if notice != nil {
 				f.status = notice.status
 				f.statusError = notice.failed
+			}
+			if owner := p.owner.Load(); owner != nil {
+				owner.resumePendingTransfer(p)
 			}
 		}, discard)
 	}()
@@ -498,10 +510,19 @@ func (a *App) fileBrowser(c *ui.Context, p *pane, full bool) {
 				})
 			}
 			if f.cancel != nil {
+				if f.records != nil && f.activeTransfer != nil {
+					for _, r := range f.records.snapshot() {
+						if r.Status == "传输中" && r.Resume {
+							ui.Button(c, "暂停").OnClick(func() { f.activeTransfer.pause.Store(true); f.cancel() })
+							break
+						}
+					}
+				}
 				ui.Button(c, "取消传输").OnClick(func() { f.cancel() })
 			}
 		})
 		ui.Text(c, "拖入文件或文件夹上传；拖到目录时上传至该目录。重名传输默认自动编号。").FontSize(11).TextColor(c.Theme().TextMuted)
+		a.transferRecordsView(c, p)
 		status := f.status
 		if f.filter != "" {
 			status = fmt.Sprintf("显示 %d / %d 项 · %s", len(visible), len(f.entries), status)
@@ -549,6 +570,19 @@ func (a *App) withTransfer(p *pane, operation func(context.Context, core.RemoteF
 		return
 	}
 	connection, ftp, protocol := p.conn, p.ftp, p.files.protocol
+	if connection != nil {
+		bindTransferIdentity(p.files, connection.Identity)
+	}
+	if p.files.records == nil {
+		p.files.records = &transferLog{}
+	}
+	records := p.files.records
+	if protocol == "" {
+		protocol = "SFTP"
+	}
+	if ftp != nil {
+		protocol = "FTP"
+	}
 	a.withFileOperation(p, true, func(ctx context.Context) error {
 		var client core.RemoteFileSystem
 		var lease func()
@@ -569,7 +603,10 @@ func (a *App) withTransfer(p *pane, operation func(context.Context, core.RemoteF
 		defer client.Close()
 		stop := context.AfterFunc(ctx, func() { client.Close() })
 		defer stop()
-		return operation(ctx, client)
+		task, _ := ctx.Value(fileTransferContextKey{}).(*fileTransfer)
+		wrapped := &recordedFileSystem{RemoteFileSystem: client, log: records, task: task, protocol: protocol}
+		defer wrapped.finish()
+		return operation(ctx, wrapped)
 	}, refreshDirectory...)
 }
 func (a *App) withFileOperation(p *pane, refresh bool, operation func(context.Context) error, refreshDirectory ...string) {
@@ -617,6 +654,9 @@ func (a *App) transferDone(p *pane, task *fileTransfer, err error) {
 		if err != nil {
 			if errors.Is(err, context.Canceled) {
 				f.status = "传输已取消"
+				if task.pause.Load() {
+					f.status = "传输已暂停；未开始的项目需重新选择"
+				}
 			} else {
 				f.status = "操作失败：" + err.Error()
 				f.statusError = true
@@ -697,12 +737,7 @@ func (a *App) download(p *pane) {
 		if len(directories) == 0 {
 			return context.Canceled
 		}
-		for _, name := range names {
-			if err := downloadUnique(ctx, client, path.Join(directory, name), directories[0], a.transferProgress(p, ctx)); err != nil {
-				return err
-			}
-		}
-		return nil
+		return downloadBatch(ctx, client, names, directory, directories[0], a.transferProgress(p, ctx))
 	})
 }
 

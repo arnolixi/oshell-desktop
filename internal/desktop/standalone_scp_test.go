@@ -3,8 +3,32 @@ package desktop
 import (
 	"context"
 	"github.com/egoist/mygo/ui"
+	"oshell-desktop/internal/core"
+	"path/filepath"
 	"testing"
 )
+
+func TestStandaloneSCPFailureRecordedWithoutSFTP(t *testing.T) {
+	log := &transferLog{}
+	task := &fileTransfer{}
+	client := &recordedFileSystem{RemoteFileSystem: &standaloneSCPFileSystem{connection: &core.Connection{}}, log: log, task: task, protocol: "SCP"}
+	if err := client.Upload(context.Background(), "fixture", "/target", nil); err == nil {
+		t.Fatal("closed connection accepted")
+	}
+	if err := client.Download(context.Background(), "/source", filepath.Join(t.TempDir(), "target"), false, nil); err == nil {
+		t.Fatal("closed connection accepted")
+	}
+	client.finish()
+	records := log.snapshot()
+	if len(records) != 2 {
+		t.Fatal(records)
+	}
+	for _, r := range records {
+		if r.Status != "失败" || r.Protocol != "SCP" || r.Error == "" || r.Resume {
+			t.Fatalf("incorrect SCP result: %+v", r)
+		}
+	}
+}
 
 func TestStandaloneSCPRemainsAvailableWithoutBrowsingClient(t *testing.T) {
 	a, p, _ := savedConnectionFixture(t)

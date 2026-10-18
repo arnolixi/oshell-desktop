@@ -58,6 +58,8 @@ type tab struct {
 	active   *pane
 }
 type App struct {
+	localUI, localUIDraft                           localPreferences
+	sidebar                                         sidebarState
 	storageDirectoryDraft, storageDirectoryOriginal string
 	storagePickerGeneration                         uint64
 	quickSendScope                                  string
@@ -116,6 +118,7 @@ func Run() error { return runDesktop() }
 func newApp(s *core.Store, c core.Config) *App {
 	v, err := core.OpenVault(s.Dir)
 	a := &App{store: s, config: c, trust: &core.TrustStore{Path: filepath.Join(s.Dir, "known_hosts")}, managerRow: -1, managerList: &ui.ListState{}, status: "就绪", vault: v}
+	a.localUI = loadLocalPreferences(s.Dir)
 	if err != nil {
 		a.status = "密码库读取失败：" + err.Error()
 	}
@@ -567,6 +570,9 @@ func (a *App) openConnection(profile core.Profile, cred core.Credentials, split 
 			replace(v.second)
 		}
 		wasZoomed := t.zoomed == old
+		if old.profile.ID == profile.ID && old.profile.Identity() == profile.Identity() {
+			p.files = reconnectFileState(old.files)
+		}
 		replace(t.root)
 		a.dispose(old)
 		t.active = p
@@ -700,7 +706,11 @@ func (a *App) openConnection(profile core.Profile, cred core.Credentials, split 
 					return
 				}
 				p.ftp = session
-				p.files = &fileState{client: files, lease: func() {}, dir: "/", input: "/"}
+				if p.files == nil {
+					p.files = &fileState{dir: "/", input: "/"}
+				}
+				p.files.client = files
+				p.files.lease = func() {}
 				p.status = "已连接"
 				if cred.SavePassword && cred.Password != "" && owner.vault != nil {
 					if saved := owner.saveAuthenticatedSessionPassword(profile, cred.Password, profile.Identity(), credentialVault, vaultRevision, requireExistingProfile, cred.PasswordProtection); saved != nil {
@@ -816,6 +826,7 @@ func (a *App) openConnection(profile core.Profile, cred core.Credentials, split 
 			return transferHandler(ctx, upload, stream)
 		}
 		opts.CopyOnSelect = settings.Input.CopyOnSelect
+		opts.CustomWordSelection, opts.WordSeparators, opts.ShiftWhitespace = true, a.localUI.WordSeparators, a.localUI.ShiftWhitespace
 		opts.KeyAliases = terminalKeyAliases(settings.KeyboardShortcuts)
 		opts.RightClickPaste = settings.Input.RightClickPaste
 		opts.TrimCopyLeading = settings.Input.TrimLeading
