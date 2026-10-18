@@ -26,7 +26,7 @@ Bundled library builds and SHA-256 hashes are pinned by internal/terminal/mygo-p
 - regexp2 v1.12.0 (MIT): resources/licenses/regexp2-LICENSE.
 - golang.org/x/text v0.42.0 and golang.org/x/term v0.46.0 (BSD): corresponding resources/licenses files.
 - Unicode 17.0.0 East Asian Width ranges (Unicode-3.0): resources/licenses/Unicode-LICENSE.
-- Ghostty has a local OShell ambiguous-width extension; exact patch, upstream commit and build procedure are in native/ghostty/. Original Ghostty licensing remains applicable.
+- Windows / Linux Ghostty binaries use the pinned builds in internal/terminal/mygo-plugin.json. The optional OShell ambiguous-width API is detected at runtime; the Windows binary does not provide it. Original Ghostty licensing remains applicable.
 
 ## FTP listing metadata patch
 

@@ -24,3 +24,4 @@ export OSHELL_CI_TEST_BUNDLE=1
 # Keep targets sequential: build.py temporarily generates shared embedded resources.
 python3 scripts/build.py --target windows/amd64 --single-file --archive
 python3 scripts/build.py --target linux/amd64 --archive
+python3 scripts/ci-test-bundle.py stage

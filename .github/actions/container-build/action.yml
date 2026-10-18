@@ -7,9 +7,6 @@ inputs:
   shard:
     description: Core race shard index for linux-core
     required: false
-  cache-scope:
-    description: Share compilation and image caches between Linux test jobs
-    required: false
 runs:
   using: composite
   steps:
@@ -21,25 +18,35 @@ runs:
       id: epoch
       shell: bash
       run: echo "month=$(date -u +%Y-%m)" >> "$GITHUB_OUTPUT"
-    - uses: actions/cache@v4
+    - uses: actions/cache/restore@v4
+      id: compiler-cache
       with:
         path: ${{ runner.temp }}/oshell-ci-cache
-        key: container-v2-${{ runner.os }}-${{ inputs.cache-scope || inputs.mode }}-${{ hashFiles('go.mod', 'go.sum') }}-${{ github.sha }}
+        key: container-v2-${{ runner.os }}-${{ inputs.mode }}-${{ hashFiles('go.mod', 'go.sum') }}-${{ github.sha }}
         restore-keys: |
-          container-v2-${{ runner.os }}-${{ inputs.cache-scope || inputs.mode }}-${{ hashFiles('go.mod', 'go.sum') }}-
-          container-v2-${{ runner.os }}-${{ inputs.cache-scope || inputs.mode }}-
-    - uses: docker/setup-buildx-action@v3
-    - name: Prepare cached build container
-      uses: docker/build-push-action@v6
+          container-v2-${{ runner.os }}-${{ inputs.mode }}-${{ hashFiles('go.mod', 'go.sum') }}-
+          container-v2-${{ runner.os }}-${{ inputs.mode }}-
+          container-v2-${{ runner.os }}-linux-${{ hashFiles('go.mod', 'go.sum') }}-
+    - uses: actions/cache@v4
+      id: image-cache
       with:
-        context: .github/docker
-        file: .github/docker/build.Dockerfile
-        load: true
-        tags: oshell-desktop-ci:ubuntu24.04-v2
-        pull: true
-        build-args: CACHE_EPOCH=${{ steps.epoch.outputs.month }}
-        cache-from: type=gha,scope=oshell-ci-${{ inputs.cache-scope || inputs.mode }}
-        cache-to: type=gha,mode=max,scope=oshell-ci-${{ inputs.cache-scope || inputs.mode }}
+        path: ${{ runner.temp }}/oshell-ci-image/image.tar
+        key: container-image-v1-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('.github/docker/build.Dockerfile') }}-${{ steps.epoch.outputs.month }}
+    - name: Load or build dependency image
+      shell: bash
+      env:
+        IMAGE_CACHE: ${{ runner.temp }}/oshell-ci-image/image.tar
+        CACHE_HIT: ${{ steps.image-cache.outputs.cache-hit }}
+        CACHE_EPOCH: ${{ steps.epoch.outputs.month }}
+      run: |
+        if [[ "$CACHE_HIT" == 'true' ]]; then
+          docker image load --input "$IMAGE_CACHE"
+        else
+          docker build --pull --build-arg "CACHE_EPOCH=$CACHE_EPOCH" \
+            --tag oshell-desktop-ci:ubuntu24.04-v2 --file .github/docker/build.Dockerfile .github/docker
+          mkdir -p "$(dirname "$IMAGE_CACHE")"
+          docker image save --output "$IMAGE_CACHE" oshell-desktop-ci:ubuntu24.04-v2
+        fi
     - name: Execute container workload
       shell: bash
       env:
@@ -48,3 +55,8 @@ runs:
         OSHELL_CI_MODE: ${{ inputs.mode }}
         OSHELL_CI_SHARD: ${{ inputs.shard }}
       run: bash scripts/build-on-runner.sh "$OSHELL_CI_MODE"
+    - uses: actions/cache/save@v4
+      if: success() && steps.compiler-cache.outputs.cache-hit != 'true' && (inputs.mode != 'linux-core' || inputs.shard == '0')
+      with:
+        path: ${{ runner.temp }}/oshell-ci-cache
+        key: ${{ steps.compiler-cache.outputs.cache-primary-key }}

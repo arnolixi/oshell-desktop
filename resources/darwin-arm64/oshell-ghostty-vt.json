@@ -1,7 +1,0 @@
-{
-  "upstream": "befcdfd2c3a1cb24d9ec886e93c95b2b5daa7028",
-  "zig": "0.16.0",
-  "patchSHA256": "ca0f1d13d876a7ad694dfadd5f5a521579f3b783c711e974e6c72f85f265c021",
-  "sha256": "800c96d81bc987a79fd32ca7601927ed05fb575c4877463dcaa1e3f4905c4968",
-  "target": "darwin-arm64"
-}

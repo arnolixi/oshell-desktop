@@ -3,6 +3,7 @@ import argparse
 import json
 import os
 from pathlib import Path
+import shutil
 import subprocess
 import sys
 
@@ -76,8 +77,38 @@ def execute_windows(shard):
             continue
         run([BUNDLE / item['binary'], '-test.v', '-test.paniconexit0', '-test.count=1', '-test.timeout=5m', '-test.run', item['pattern']],
             cwd=ROOT / item['directory'])
-    for script in ['test-build.py', 'test-configuration-contract.py', 'test-core-shards.py', 'test-runner-artifact.py']:
+    for script in ['test-build.py', 'test-configuration-contract.py', 'test-core-shards.py', 'test-ci-bundle.py']:
         run([sys.executable, ROOT / 'scripts' / script], cwd=ROOT)
+
+
+def stage_windows_bundles(source=BUNDLE, output=ROOT / 'validation'):
+    """Publish only the binaries consumed by each Windows job, without recompiling."""
+    manifest = json.loads((source / 'manifest.json').read_text())
+    groups = {'windows-regression': [], 'windows-core-race': []}
+    for item in manifest['tests']:
+        group = 'windows-core-race' if item['race'] and item['package'] == CORE else 'windows-regression'
+        groups[group].append(item)
+    if len(groups['windows-core-race']) != 1:
+        raise ValueError('Expected exactly one core race binary')
+    plans = {}
+    for name, tests in groups.items():
+        files = {item['binary'] for item in tests} | {'update-fixture.exe'}
+        if name == 'windows-core-race':
+            files.add('test2json.exe')
+        if (output / name).exists():
+            raise ValueError('Refusing to mix a stale Windows test bundle')
+        for file in files:
+            if Path(file).name != file or not (source / file).is_file():
+                raise ValueError('Missing or invalid test binary: ' + file)
+        plans[name] = (tests, files)
+    for name, (tests, files) in plans.items():
+        target = output / name
+        target.mkdir(parents=True)
+        for file in sorted(files):
+            shutil.copy2(source / file, target / file)
+        (target / 'manifest.json').write_text(json.dumps(dict(manifest, tests=tests), indent=2) + '\n', encoding='utf-8')
+        size = sum((source / file).stat().st_size for file in files)
+        print(f'{name}: {len(files)} binaries, {size} uncompressed bytes', flush=True)
 
 
 def linux(shard=None):
@@ -100,7 +131,7 @@ def linux(shard=None):
     run(['go', 'test', '-race', '-count=1', '-timeout=5m', *RACE[1:]], cwd=ROOT)
     run(['xvfb-run', '-a', 'dbus-run-session', '--', 'go', 'test', '-count=1', '-timeout=180s', './...'], cwd=ROOT)
     run(['go', 'test', '-count=1', *PARSERS, '-run', 'Test(UNIXMetadata|OwnerHints|Parse)'], cwd=ROOT)
-    for script in ['test-build.py', 'test-core-shards.py', 'test-configuration-contract.py', 'test-runner-artifact.py']:
+    for script in ['test-build.py', 'test-core-shards.py', 'test-configuration-contract.py', 'test-ci-bundle.py']:
         run([sys.executable, ROOT / 'scripts' / script], cwd=ROOT)
     run(['go', 'build', './...'], cwd=ROOT, env=dict(os.environ, CGO_ENABLED='0'))
     run(['go', 'vet', './...'], cwd=ROOT)
@@ -108,10 +139,12 @@ def linux(shard=None):
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('mode', choices=['compile', 'embedded', 'windows', 'linux', 'linux-core'])
+    parser.add_argument('mode', choices=['compile', 'embedded', 'stage', 'windows', 'linux', 'linux-core'])
     parser.add_argument('--shard', type=int)
     args = parser.parse_args()
-    if args.mode in ('compile', 'embedded'):
+    if args.mode == 'stage':
+        stage_windows_bundles()
+    elif args.mode in ('compile', 'embedded'):
         compile_bundle(args.mode == 'embedded')
     elif args.mode == 'windows':
         execute_windows(args.shard)

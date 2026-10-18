@@ -34,9 +34,15 @@ Windows core 竞态测试二进制由容器统一预编译；Linux 各分片复�
 
 - `.github/docker/build.Dockerfile` 缓存 Ubuntu 24.04 系统依赖，包括 MinGW 交叉编译器及 Linux 图形测试运行库，每月刷新系统包。
 - `actions/setup-go` 仅安装工具链，只读挂载 `/opt/go`，所有编译在容器内执行。
-- `actions/cache` 保存模块、编译缓存、原生资源，Docker Buildx 的 `gha` 后端保存系统镜像层。缓存按任务与依赖区分，适配每次新建的官方 Runner。Go 自动按工具链/平台/编译输入隔离缓存，依赖仍由 `go.sum` 校验。
+- `actions/cache` 保存 `docker image save` 生成的完整依赖镜像，命中后直接 `docker image load`，省去 Buildx 每个任务重复导出镜像的开销。镜像键包含 Dockerfile 摘要、架构和月份，首次运行或键变化时重新构建。
+- Go 模块、编译缓存和原生资源按任务与依赖区分。Linux core 分片共享专用缓存，仅分片 0 保存，避免四片同时压缩和上传相同内容。Go 自动按工具链/平台/编译输入隔离缓存，依赖仍由 `go.sum` 校验。
+- Windows 普通回归与 core 竞态分别发布测试包，四个 core 分片只下载 core 二进制、日志适配器和升级辅助程序；仍保留提交校验、完整测试发现和分片审计。已压缩的产品 ZIP / tar.gz 上传时不重复压缩。
 - Windows / Linux 发布包在同一容器内顺序构建，避免临时生成的嵌入资源冲突。Windows 额外编译带真实嵌入资源的测试，在真实 Windows 验证。
 - 容器仅挂载工作区、只读工具链及缓存目录，不挂载宿主 Docker socket 或凭据。退出或取消时恢复工作区所有权。
 - 推送、PR 和手动运行均进入官方临时 Runner，不依赖组织服务器；Linux 回归与打包并行开始。分支新提交取消旧任务，标签不自动取消。
 
 首次运行需初始化镜像和 Windows 交叉编译竞态缓存，不能代表热缓存速度。比较优化耗时应同时报告冷缓存和热缓存；清理 Actions 缓存只影响后续构建速度，不涉及用户配置。
+
+## 官方 Runner 缓存优化基线
+
+提交 `734cf6f` 的[完整成功运行](https://github.com/oshell-desktop/oshell-desktop/actions/runs/39102373704)从首个任务开始至分片审计完成耗时 6 分 15 秒。两平台打包任务为 1 分 51 秒，Linux 回归为 3 分 1 秒，Windows 回归为 2 分 39 秒。打包任务即使命中镜像层缓存，仍花约 40 秒重新导出并装载 Docker 镜像；Windows 四个 core 分片均下载完整测试包。本次优化针对这两项准备开销，测试范围及安全参数保持不变。

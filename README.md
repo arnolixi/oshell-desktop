@@ -45,7 +45,7 @@ go run .
 
 core 竞态测试根据历史时间分成 4 片。Linux 使用 4 个独立 Ubuntu Runner，各自在容器内执行；Windows 使用 4 个独立执行任务。调度权重由完整竞态分片的真实日志生成，每次运行继续产出逐项耗时。每次从本次二进制自动发现测试，新增测试不会遗漏；原始日志与执行清单须通过汇总审计。详见 [CI 性能说明](docs/ci-performance.md)。
 
-Docker Buildx 使用 GitHub Actions 缓存保存系统依赖镜像层，`actions/cache` 保存 Go 模块、编译缓存和原生资源，官方 Runner 更换后仍能复用；测试结果不缓存。两平台打包按顺序执行，避免临时嵌入资源相互覆盖。官方 Ubuntu Runner 提供 Docker 和 GitHub CLI；宿主只准备与 `go.mod` 一致的 Go 工具链并只读挂载容器。构建容器不挂载 Docker socket 或用户凭据，结束后恢复工作区所有权。
+`actions/cache` 保存可直接装载的依赖镜像、Go 模块、编译缓存和原生资源，官方 Runner 更换后仍能复用；镜像按 Dockerfile 和月份更新，避免每个任务重复导出镜像层。测试结果不缓存。Windows 测试包按普通回归与 core 竞态拆分，各任务只下载需要的二进制。两平台打包按顺序执行，避免临时嵌入资源相互覆盖。官方 Ubuntu Runner 提供 Docker 和 GitHub CLI；宿主只准备与 `go.mod` 一致的 Go 工具链并只读挂载容器。构建容器不挂载 Docker socket 或用户凭据，结束后恢复工作区所有权。
 
 推送、PR 和手动运行均使用官方临时 Runner，不再依赖组织服务器。Linux 测试与两平台打包同时开始。所有回归、分片审计、打包与产物验证成功后才允许发布 Release；Artifacts 提前出现不代表测试已通过。
 
@@ -97,7 +97,6 @@ Windows CI 另用固定版本及 SHA-256 的 [lrzsz Windows 便携工具](https:
 本机可将 `rz.exe` / `sz.exe` 及其 DLL 放入 PATH，再设置 `OSHELL_REQUIRE_LRZSZ=1` 运行测试；测试工具不会打入产品包。
 Linux CI 安装发行版的 `lrzsz` 执行相同的互通测试。本机 Linux 无图形会话时可用 `xvfb-run -a dbus-run-session -- go test ./...` 运行桌面回归，需先安装 `xvfb`、`xauth` 和 `dbus-x11`。
 可设置 `OSHELL_TEST_ARTIFACTS=/absolute/path` 输出 UI 回归截图。
-`validation/report-20261009-221430.zip` 是本机保留的用户 Windows 实测报告，不随源码上传，非安装包。
 
 ## 维护结构
 
@@ -105,9 +104,8 @@ Linux CI 安装发行版的 `lrzsz` 执行相同的互通测试。本机 Linux �
 - `internal/desktop`：窗口、原生 UI、交互与桌面测试。
 - `internal/terminal`、`internal/zmodem`：终端实现、平台 PTY 与传输。
 - `cmd/oshell-launcher`：保留的 macOS 外部连接助手源码，不参与发布打包。
-- `cmd/oshell-release`：离线签名工具；协议与使用方式见 [更新协议](docs/updates.md)。
+- `cmd/oshell-release`：保留的离线签名工具源码，不参与 Windows / Linux Release 打包；当前发布流程见[自更新文档](docs/updates-portable.md)。
 - `scripts/build.py`：本机 / CI 共用打包入口。
-- `scripts/build-native-macos.py`、`native/ghostty`、`resources/darwin-arm64`：历史 macOS 原生扩展源码、工具与固定资源，保留供维护，不在当前构建或 CI 中使用。
 - `third_party/mygo`：固定框架源码，含运行时渲染后端切换补丁；保留上游结构、测试和许可证。
 
 许可见 [LICENSE](LICENSE) 和 [第三方声明](THIRD_PARTY_NOTICES.md)。

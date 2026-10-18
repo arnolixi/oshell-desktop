@@ -2,7 +2,6 @@
 """Build a native app locally; add --archive for GitHub Actions artifacts."""
 import argparse
 import os
-import os
 from pathlib import Path
 import platform
 import shutil

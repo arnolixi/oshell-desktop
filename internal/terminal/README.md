@@ -1,26 +1,20 @@
-# terminal
+# OShell terminal adapter
 
-A terminal for [MyGo](https://github.com/egoist/mygo) apps of native UI: a
-view that runs the user's shell, or any program, in a pseudo-terminal, with
-[Ghostty](https://ghostty.org)'s terminal emulator, libghostty-vt, loaded
-at run time with no cgo.
+Derived from [egoist/mygo](https://github.com/egoist/mygo) plugins/terminal at
+`bad73d119dc8d00a10daba45f19ba484e754d7a8`. The original MIT license is retained
+in [LICENSE](LICENSE).
 
-```go
-import "github.com/egoist/mygo/plugins/terminal"
+The local package is `oshell-desktop/internal/terminal`. It combines the native
+mygo terminal view, platform PTY support and libghostty-vt, loaded at runtime
+without cgo. [mygo-plugin.json](mygo-plugin.json) pins native library downloads
+and SHA-256 hashes; the application build collects the Windows DLL or Linux
+shared library. Windows single-file builds embed the DLL and its licenses.
+See the [project README](../../README.md) for supported builds and runtime setup.
 
-term, err := terminal.New(terminal.Options{})
-// ...
-mygo.NewWindow(mygo.WindowOptions{Title: "Terminal", Content: ui.View(func(c *ui.Context) {
-	terminal.View(c, term).Fill().AutoFocus()
-})})
-```
+OShell adds semantic input observation/replay, paste policy, copy trimming,
+output observation/logging, viewport search, highlight rendering and configurable
+word selection. The optional ambiguous-width native API is detected at runtime;
+the pinned Windows DLL does not implement it.
 
-See [the documentation](../../docs/plugins/terminal.md), and
-`examples/terminal` for an app.
-
-`go generate` here builds libghostty-vt for every platform with Zig, from
-the commit of Ghostty in `internal/libbuild`, into `build/`, and writes
-`mygo-plugin.json`, which names the files and their SHA-256 for the CLI and
-this package: publish them as the assets of the release that file points
-at. It writes `ghostty_themes.go` too, the themes that Ghostty ships, which
-`go run ./internal/libbuild -themes` writes alone, without Zig.
+Upstream parser, PTY and renderer tests remain alongside OShell regressions.
+CI executes these on Windows and Linux, including PTY race detection.

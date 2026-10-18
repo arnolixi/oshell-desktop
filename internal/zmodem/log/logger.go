@@ -13,7 +13,6 @@ import (
 
 func Info(msg string)  { emit(msg) }
 func Error(msg string) { emit(msg) }
-func Debug(msg string) { emit(msg) }
 
 // TransferStatus logs a protocol-tagged status line.
 func TransferStatus(protocol, msg string) {

@@ -22,20 +22,28 @@ jobs:
           mode: package
       - uses: actions/upload-artifact@v4
         with:
-          name: windows-tests
-          path: validation/windows-tests/*
+          name: windows-regression
+          path: validation/windows-regression/*
+          if-no-files-found: error
+          retention-days: 7
+      - uses: actions/upload-artifact@v4
+        with:
+          name: windows-core-race
+          path: validation/windows-core-race/*
           if-no-files-found: error
           retention-days: 7
       - uses: actions/upload-artifact@v4
         with:
           name: oshell-windows-amd64
           path: dist/OShell-Desktop-windows-amd64-single-file.zip
+          compression-level: 0
           if-no-files-found: error
           retention-days: 7
       - uses: actions/upload-artifact@v4
         with:
           name: oshell-linux-amd64
           path: dist/OShell-Desktop-linux-amd64.tar.gz
+          compression-level: 0
           if-no-files-found: error
           retention-days: 7
   linux:
@@ -65,7 +73,6 @@ jobs:
         with:
           mode: linux-core
           shard: ${{ matrix.shard }}
-          cache-scope: linux
       - uses: actions/upload-artifact@v4
         if: always()
         with:
@@ -86,7 +93,7 @@ jobs:
           python-version: '3.12'
       - uses: actions/download-artifact@v4
         with:
-          name: windows-tests
+          name: windows-regression
           path: validation/windows-tests
       - name: Prepare pinned Windows rz/sz interoperability peer
         shell: pwsh
@@ -132,7 +139,7 @@ jobs:
           python-version: '3.12'
       - uses: actions/download-artifact@v4
         with:
-          name: windows-tests
+          name: windows-core-race
           path: validation/windows-tests
       - name: Execute precompiled race shard with complete test accounting
         run: python scripts/ci-test-bundle.py windows --shard ${{ matrix.shard }}
