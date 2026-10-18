@@ -1,0 +1,43 @@
+name: Container build and tests
+description: Compile only inside Docker, with caches that survive hosted Runner replacement
+inputs:
+  mode:
+    description: package or linux
+    required: true
+runs:
+  using: composite
+  steps:
+    - uses: actions/setup-go@v5
+      with:
+        go-version-file: go.mod
+        cache: false
+    - name: Container dependency cache epoch
+      id: epoch
+      shell: bash
+      run: echo "month=$(date -u +%Y-%m)" >> "$GITHUB_OUTPUT"
+    - uses: actions/cache@v4
+      with:
+        path: ${{ runner.temp }}/oshell-ci-cache
+        key: container-v2-${{ runner.os }}-${{ inputs.mode }}-${{ hashFiles('go.mod', 'go.sum') }}-${{ github.sha }}
+        restore-keys: |
+          container-v2-${{ runner.os }}-${{ inputs.mode }}-${{ hashFiles('go.mod', 'go.sum') }}-
+          container-v2-${{ runner.os }}-${{ inputs.mode }}-
+    - uses: docker/setup-buildx-action@v3
+    - name: Prepare cached build container
+      uses: docker/build-push-action@v6
+      with:
+        context: .github/docker
+        file: .github/docker/build.Dockerfile
+        load: true
+        tags: oshell-desktop-ci:ubuntu24.04-v2
+        pull: true
+        build-args: CACHE_EPOCH=${{ steps.epoch.outputs.month }}
+        cache-from: type=gha,scope=oshell-ci-${{ inputs.mode }}
+        cache-to: type=gha,mode=max,scope=oshell-ci-${{ inputs.mode }}
+    - name: Execute container workload
+      shell: bash
+      env:
+        OSHELL_CI_IMAGE_READY: '1'
+        OSHELL_CI_CACHE_DIR: ${{ runner.temp }}/oshell-ci-cache
+        OSHELL_CI_MODE: ${{ inputs.mode }}
+      run: bash scripts/build-on-runner.sh "$OSHELL_CI_MODE"

@@ -30,13 +30,13 @@
 
 ## 容器与缓存
 
-所有编译任务使用组织 Runner `[self-hosted, linux, x64, docker-runner]`，由 `scripts/build-on-runner.sh` 调用 Docker。Windows 执行任务没有 Go 构建步骤；升级辅助程序和 JSON 日志适配器也由容器预编译。测试包携带提交 SHA，执行前校验。
+所有编译任务使用 GitHub 官方 `ubuntu-24.04` Runner，由 `scripts/build-on-runner.sh` 调用 Docker。Windows 执行任务没有 Go 构建步骤；升级辅助程序和 JSON 日志适配器也由容器预编译。测试包携带提交 SHA，执行前校验。
 
 - `.github/docker/build.Dockerfile` 缓存 Ubuntu 24.04 系统依赖，包括 MinGW 交叉编译器及 Linux 图形测试运行库，每月刷新系统包。
 - `actions/setup-go` 仅安装工具链，只读挂载 `/opt/go`，所有编译在容器内执行。
-- 专用 Docker 卷 `oshell-desktop-build-cache-v1` 保存模块、编译缓存、原生资源。Go 自动按工具链/平台/编译输入隔离缓存，依赖仍由 `go.sum` 校验。
+- `actions/cache` 保存模块、编译缓存、原生资源，Docker Buildx 的 `gha` 后端保存系统镜像层。缓存按任务与依赖区分，适配每次新建的官方 Runner。Go 自动按工具链/平台/编译输入隔离缓存，依赖仍由 `go.sum` 校验。
 - Windows / Linux 发布包在同一容器内顺序构建，避免临时生成的嵌入资源冲突。Windows 额外编译带真实嵌入资源的测试，在真实 Windows 验证。
-- 容器仅挂载工作区、只读工具链及缓存卷，不挂载宿主 Docker socket 或凭据。退出或取消时恢复工作区所有权。
-- 不执行外部 fork PR 的代码；维护者审查后在仓库自身分支运行完整 CI。分支新提交取消旧任务，标签不自动取消。
+- 容器仅挂载工作区、只读工具链及缓存目录，不挂载宿主 Docker socket 或凭据。退出或取消时恢复工作区所有权。
+- 推送、PR 和手动运行均进入官方临时 Runner，不依赖组织服务器；Linux 回归与打包并行开始。分支新提交取消旧任务，标签不自动取消。
 
-首次运行需初始化镜像和 Windows 交叉编译竞态缓存，不能代表热缓存速度。比较优化耗时应同时报告冷缓存和热缓存；清理镜像/缓存卷只影响后续构建速度，不涉及用户配置。
+首次运行需初始化镜像和 Windows 交叉编译竞态缓存，不能代表热缓存速度。比较优化耗时应同时报告冷缓存和热缓存；清理 Actions 缓存只影响后续构建速度，不涉及用户配置。

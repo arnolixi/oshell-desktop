@@ -39,15 +39,15 @@ go run .
 
 ## GitHub Actions
 
-工作流 `.github/workflows/build.yml` 使用组织 Runner 标签 `[self-hosted, linux, x64, docker-runner]`。所有 Go 编译、静态检查、应用打包及测试辅助程序构建均在 Docker 容器中执行；GitHub Windows 机器只执行同一提交的预编译 EXE 和测试程序，不安装或调用 Go 编译器。
+工作流 `.github/workflows/build.yml` 使用 GitHub 官方 `ubuntu-24.04` 和 `windows-latest` Runner。所有 Go 编译、静态检查、应用打包及测试辅助程序构建均在 Docker 容器中执行；GitHub Windows 机器只执行同一提交的预编译 EXE 和测试程序，不安装或调用 Go 编译器。
 
 保留 Windows / Linux 全量回归、桌面与终端、core / PTY / ZMODEM 竞态检测、配置合同和构建工具测试，以及真实 Windows 单文件启动、DLL 释放、升级重启和配置保留验证。Linux 使用虚拟显示运行桌面测试。
 
-core 竞态测试根据历史时间分成 4 片。Linux 在一个容器内并发运行 4 个独立测试进程，只有一个组织 Runner 也能并行；Windows 使用 4 个独立执行任务。初始调度权重来自普通测试计时，后续完整竞态运行自动产出真实时间日志。每次从本次二进制自动发现测试，新增测试不会遗漏；原始日志与执行清单须通过汇总审计。详见 [CI 性能说明](docs/ci-performance.md)。
+core 竞态测试根据历史时间分成 4 片。Linux 在一个容器内并发运行 4 个独立测试进程；Windows 使用 4 个独立执行任务。初始调度权重来自普通测试计时，后续完整竞态运行自动产出真实时间日志。每次从本次二进制自动发现测试，新增测试不会遗漏；原始日志与执行清单须通过汇总审计。详见 [CI 性能说明](docs/ci-performance.md)。
 
-Docker 镜像缓存系统依赖，专用卷持久保存 Go 模块、编译缓存和原生资源；测试结果不缓存。两平台打包按顺序执行，避免临时嵌入资源相互覆盖。组织 Runner 需要 Docker 和 GitHub CLI；宿主只准备与 `go.mod` 一致的 Go 工具链并只读挂载容器。构建容器不挂载 Docker socket 或用户凭据，结束后恢复工作区所有权。
+Docker Buildx 使用 GitHub Actions 缓存保存系统依赖镜像层，`actions/cache` 保存 Go 模块、编译缓存和原生资源，官方 Runner 更换后仍能复用；测试结果不缓存。两平台打包按顺序执行，避免临时嵌入资源相互覆盖。官方 Ubuntu Runner 提供 Docker 和 GitHub CLI；宿主只准备与 `go.mod` 一致的 Go 工具链并只读挂载容器。构建容器不挂载 Docker socket 或用户凭据，结束后恢复工作区所有权。
 
-自托管任务接受仓库自身分支与手动运行，不执行来自外部 fork 的 PR 代码。外部贡献须先审查，再由维护者将确认的提交放入仓库分支运行完整 CI。所有回归、分片审计、打包与产物验证成功后才允许发布 Release；Artifacts 提前出现不代表测试已通过。
+推送、PR 和手动运行均使用官方临时 Runner，不再依赖组织服务器。Linux 测试与两平台打包同时开始。所有回归、分片审计、打包与产物验证成功后才允许发布 Release；Artifacts 提前出现不代表测试已通过。
 
 CI 使用统一入口：
 
