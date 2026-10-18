@@ -104,7 +104,12 @@ jobs:
           go-version-file: go.mod
           cache: false
       - name: Package application in container
-        run: python3 scripts/build.py --target ${{ matrix.target }} ${{ matrix.options }} --archive
+        run: |
+          # Checkout's safe.directory applies only to its temporary HOME.
+          # Go also reads Git metadata from the host-owned workspace.
+          git config --global --add safe.directory "$GITHUB_WORKSPACE"
+          git status --short
+          python3 scripts/build.py --target ${{ matrix.target }} ${{ matrix.options }} --archive
       - uses: actions/upload-artifact@v4
         with:
           name: oshell-${{ matrix.artifact }}
