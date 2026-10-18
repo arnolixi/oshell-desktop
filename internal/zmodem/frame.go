@@ -290,25 +290,3 @@ func (c *codec) header16(frame byte, count uint32) []byte {
 	out = c.escape(out, []byte{byte(crc >> 8), byte(crc)})
 	return out
 }
-
-// BuildZbin32Header emits a ZBIN32 (CRC32) header: ZPAD ZDLE 'C' + escaped
-// 5-byte payload + escaped CRC32 (little-endian, lsb first).
-func (c *codec) header32(frame byte, count uint32) []byte {
-	out := []byte{ZPAD, ZDLE, ZBIN32}
-	payload := []byte{
-		frame,
-		byte(count),
-		byte(count >> 8),
-		byte(count >> 16),
-		byte(count >> 24),
-	}
-	out = c.escape(out, payload)
-	crc := CRC32(payload)
-	out = c.escape(out, []byte{
-		byte(crc),
-		byte(crc >> 8),
-		byte(crc >> 16),
-		byte(crc >> 24),
-	})
-	return out
-}

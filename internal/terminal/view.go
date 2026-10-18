@@ -105,6 +105,7 @@ type view struct {
 	mouse        *vt.MouseEncoder
 	gesture      *vt.Gesture
 	gestureStart time.Time
+	wordClicks   wordClickState
 
 	// pending is a key that types text, until the text comes; preedit
 	// is an input method's composition and its caret.
@@ -287,6 +288,7 @@ func (v *view) input(ev ui.InputEvent) bool {
 	case ui.InputPointerDown, ui.InputPointerUp, ui.InputPointerMove:
 		return v.pointerEvent(ev)
 	case ui.InputScroll:
+		v.wordClicks = wordClickState{}
 		return v.scroll(ev)
 	}
 	return false
@@ -356,6 +358,7 @@ func (v *view) scrollPage(up bool) bool {
 		page = -page
 	}
 	t.term.ScrollBy(page)
+	v.wordClicks = wordClickState{}
 	v.scrollingActivity()
 	return true
 }
@@ -450,6 +453,7 @@ func (v *view) encodeKey(k vt.KeyEvent, press bool) bool {
 	}
 	t.in.push(append([]byte(nil), b...))
 	if press {
+		v.wordClicks = wordClickState{}
 		t.term.ScrollToBottom()
 		t.term.SetSelection(nil)
 	}
@@ -458,6 +462,7 @@ func (v *view) encodeKey(k vt.KeyEvent, press bool) bool {
 
 // sendText sends text that is no key, as of an input method.
 func (v *view) sendText(text string) {
+	v.wordClicks = wordClickState{}
 	t := v.t
 	t.mu.Lock()
 	if t.term != nil {
@@ -483,12 +488,14 @@ func (v *view) copy() {
 }
 
 func (v *view) paste() {
+	v.wordClicks = wordClickState{}
 	if text := v.services.ReadClipboard(); text != "" {
 		v.t.RequestPaste(text)
 	}
 }
 
 func (v *view) selectAll() {
+	v.wordClicks = wordClickState{}
 	t := v.t
 	t.mu.Lock()
 	if t.term != nil {
@@ -522,10 +529,12 @@ func (v *view) pointerEvent(ev ui.InputEvent) bool {
 		return false
 	}
 	if v.scrollbarInput(ev) {
+		v.wordClicks = wordClickState{}
 		return true
 	}
 	tracking := t.term.MouseTracking() && ev.Mods&ui.Shift == 0
 	if tracking && !v.selecting || v.reporting {
+		v.wordClicks = wordClickState{}
 		return v.report(ev)
 	}
 	if v.gesture == nil {
@@ -541,6 +550,7 @@ func (v *view) pointerEvent(ev ui.InputEvent) bool {
 	switch ev.Kind {
 	case ui.InputPointerDown:
 		if ev.Button != 0 {
+			v.wordClicks = wordClickState{}
 			return false // the context menu
 		}
 		if ev.Mods&ui.Cmd != 0 {
@@ -563,15 +573,22 @@ func (v *view) pointerEvent(ev ui.InputEvent) bool {
 			return false
 		}
 		v.selecting = true
+		ns := uint64(time.Since(v.gestureStart))
+		var selection vt.Selection
+		var selected bool
 		if t.opts.CustomWordSelection {
-			boundaries := " \t\r\n\v\f\u0085\u00a0\u1680\u2000\u2001\u2002\u2003\u2004\u2005\u2006\u2007\u2008\u2009\u200a\u2028\u2029\u202f\u205f\u3000"
-			if ev.Mods&ui.Shift == 0 || !t.opts.ShiftWhitespace {
+			count, whitespace := v.wordClicks.press(ref, t.revision, px, py, 5*float64(v.scale), ns)
+			boundaries := wordWhitespace
+			if !whitespace && (ev.Mods&ui.Shift == 0 || !t.opts.ShiftWhitespace) {
 				boundaries += t.opts.WordSeparators
 			}
 			v.gesture.SetWordBoundaries(boundaries)
+			selection, selected = v.gesture.PressCount(t.term, ref, px, py, ns, count)
+		} else {
+			selection, selected = v.gesture.Press(t.term, ref, px, py, ns)
 		}
-		if s, ok := v.gesture.Press(t.term, ref, px, py, uint64(time.Since(v.gestureStart))); ok {
-			t.term.SetSelection(&s)
+		if selected {
+			t.term.SetSelection(&selection)
 		} else {
 			t.term.SetSelection(nil)
 		}
@@ -586,6 +603,9 @@ func (v *view) pointerEvent(ev ui.InputEvent) bool {
 		}
 		if s, ok := v.gesture.Drag(t.term, ref, px, py, v.geometry(), ev.Mods&ui.Alt != 0); ok {
 			t.term.SetSelection(&s)
+		}
+		if v.gesture.Dragged(t.term) {
+			v.wordClicks = wordClickState{}
 		}
 		v.ticking = v.gesture.Autoscroll(t.term) != 0
 		return true

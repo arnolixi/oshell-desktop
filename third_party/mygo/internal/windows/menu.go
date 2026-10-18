@@ -364,6 +364,7 @@ func (b *Backend) PopupMenu(m *platform.Menu, pw platform.Window, pos *platform.
 
 // trackPopup shows a popup menu and returns the chosen command, or 0.
 func (b *Backend) trackPopup(menu, owner uintptr, pt point) uint16 {
+	b.applyNativeMenuTheme(owner)
 	// The owner must be in the foreground, or the menu does not close
 	// when the user clicks elsewhere.
 	procSetForegroundWindow.Call(owner)

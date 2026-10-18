@@ -20,6 +20,25 @@ func (a *App) toolbar(c *ui.Context) {
 		}
 	}
 	ui.Toolbar(c, func() {
+		visible := a.localUI.SidebarVisible
+		hint := "显示会话侧栏"
+		if visible {
+			hint = "隐藏会话侧栏"
+		}
+		if a.localUI.SidebarShortcut.Valid() {
+			hint += "（" + a.localUI.SidebarShortcut.Display(runtime.GOOS) + "）"
+		}
+		sidebar := toolButton(c.Key("sidebar-toggle"), "会话侧栏", sidebarIcon, "侧栏").
+			Shrink(0).Role(ui.RoleToggleButton).Checked(visible).Tooltip(hint).
+			Disabled(a.passwordLocked() || a.modalActive()).OnClick(a.toggleSidebar)
+		if visible {
+			sidebar.Background(c.Theme().Selection)
+			if sidebar.Pressed() {
+				sidebar.Background(c.Theme().SurfacePressed)
+			} else if sidebar.Hovered() {
+				sidebar.Background(c.Theme().SurfaceHover)
+			}
+		}
 		for _, title := range []string{"OShell", "会话", "快捷连接", "编辑", "视图", "窗口", "快速命令", "工具"} {
 			if title == "编辑" {
 				a.headerEditButton(c)
@@ -40,7 +59,6 @@ func (a *App) toolbar(c *ui.Context) {
 		ui.Box(c).Width(1).Height(18).Background(c.Theme().Border)
 		toolButton(c, "会话管理", terminalIcon, "").Shrink(0).OnClick(func() { a.performAction("sessionManager") })
 		toolButton(c, "文件管理", folderIcon, "").Shrink(0).OnClick(func() { a.performAction("fileManager") })
-		toolButton(c, "会话侧栏", sidebarIcon, "").Shrink(0).OnClick(a.toggleSidebar)
 		toolButton(c, "设置", settingsIcon, "").Shrink(0).OnClick(func() { a.performAction("settings") })
 		a.updateToolbar(c)
 	}).Height(38).Padding(6, 8).Gap(5).Background(c.Theme().Background).BorderWidth(0, 0, 1, 0).BorderColor(c.Theme().Border).Label("主工具栏")

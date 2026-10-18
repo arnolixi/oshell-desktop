@@ -100,6 +100,7 @@ func (a *App) localSelectionSettings(c *ui.Context) {
 	p := &a.localUIDraft
 	ui.Text(c, "选择").Bold()
 	ui.TextInput(c, &p.WordSeparators).Label("双击选词分隔符").FillWidth()
+	ui.Text(c, "首次双击按分隔符选词；同一位置再次双击按空白扩大选择。三击仍选整行。").TextColor(c.Theme().TextMuted).Wrap()
 	ui.Button(c, "重置分隔符").OnClick(func() { p.WordSeparators = defaultWordSeparators })
 	ui.Checkbox(c, &p.ShiftWhitespace, "Shift+双击按空白选取（关闭后按分隔符）")
 	s := &a.features.settingsDraft.Input

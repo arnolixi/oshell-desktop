@@ -209,33 +209,10 @@ WebDAV 必须使用 HTTPS，账号密码独立传输；只允许测试工具对 
 
 各应用可以有更严格的输入限制或平台支持范围。能解码不代表当前平台能运行对应功能，也不代表所有可能设置都已无损互通。共享私钥路径、字体、快捷键和渲染选项不得声称在所有系统有相同执行效果。
 
-## 9. 版本演进与当前已知边界
+## 9. 历史边界与当前规则
 
-当前 v1 的 Swift Codable 和部分 Go 类型会忽略未登记字段，并不提供普遍的“未知字段原样往返”能力。现有 `autoCursor` 等 Desktop 扩展也不在本规范的共同字段保证范围；不能因外层仍为 v1 就认为 macOS 保存后一定保留它们。未登记字段、未来枚举值和更高版本属于未承诺兼容范围。
+旧 v1 客户端可能忽略未知字段，不能保证未登记扩展无损往返。本文中的字段表仅用于解释历史数据；当前字段、默认值、严格校验、版本迁移和验收均以 [v2 规范](configuration-protocol-v2.md) 及其可执行合同为准。
 
-后续变更必须遵守：
+v2 已实现，不支持未知字段原样保留、能力协商或自动降级。旧客户端应升级后再参与同一同步目标。
 
-- 单端功能优先保存为本机状态；不可在现有共享结构中私自增加有持久化要求的字段。
-- 新共享字段必须同时定义类型、默认值、身份影响、缺失/null 语义、旧节点行为及双向测试。未经验证不能宣布兼容。
-- 如果旧客户端会忽略关键字段或丢失数据，必须另行设计可拒绝旧写入的协议版本/能力机制及迁移方案；在两端支持前不能发布新共享写入格式。
-- v2、`minReaderVersion`、能力协商、未知字段保留机制目前均未实现。本次规范文档不启用它们，不可擅自在当前文件中增加这些字段后继续由 v1 节点写入。
-- 协议修改与测试样本一起审查，不能靠删掉兼容测试来接受行为变化；文档修订号与线协议版本分别管理。
-
-## 10. 验收与追溯
-
-协议修改必须运行（在 oshell-desktop 目录）：
-
-```sh
-go test ./internal/core -run 'Test(NativeSwiftSharedFixture|SharedQuickSendScope|LegacySharedProtocol|SharedEncodingNormalization)'
-python3 scripts/test-sync-interop.py --native-source /path/to/OShell
-```
-
-第二条使用真实 Swift 核心和 Go 核心，仅使用合成凭据、本机 WebDAV 模拟服务与临时目录。必须覆盖两种创建方向、代理密码、引用、旧版编码升级、不同会话合并、同会话冲突、过期写入拒绝及无变化不重写。共享结构新增字段时扩展测试；不能用一次固定样本成功替代全部字段的兼容性评估。
-
-实现依据：
-
-- Swift：`SharedVault.swift`、`SessionCipher.swift`、`Models.swift`、`ProxyCatalog.swift`、`ConfigurationMerge.swift`、`WebDAV.swift`、`DirectorySyncClient.swift`。
-- Go：`shared_document.go`、`shared_protocol.go`、`mac_cipher.go`、`portable_archive.go`、`shared_merge.go`、`shared_sync.go`、`sync_transport.go`。
-- 合成跨端样本：`internal/core/testdata/oshell-swift-shared-v1.json`；生成器：`scripts/interop/main.swift`。
-
-本规范的单一维护源在 oshell-desktop。OShell 仓库保留引用入口；发布时记录两端提交号及本规范修订号，避免维护两份内容相似但互相偏离的规范。接入操作见 [共享配置使用说明](shared-configuration.md)。
+实现入口：`shared_document.go`、`shared_protocol.go`、`mac_cipher.go`、`portable_archive.go`、`shared_merge.go`、`shared_sync.go` 和 `sync_transport.go`。跨端合成样本位于 `internal/core/testdata/`，Swift 生成器为 `scripts/interop/main.swift`。

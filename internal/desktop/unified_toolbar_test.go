@@ -35,6 +35,19 @@ func TestUnifiedHeaderFitsMinimumWindowAndRoutesMenus(t *testing.T) {
 		} else {
 			snapshot(t, tt, "unified-header-light.png")
 		}
+		for _, visible := range []bool{false, true} {
+			if err := tt.Click("会话侧栏"); err != nil {
+				t.Fatal(err)
+			}
+			tt.Frame()
+			_, sidebarShown := tt.Find("搜索会话侧栏")
+			if sidebarShown != visible || loadLocalPreferences(a.store.Dir).SidebarVisible != visible {
+				t.Fatal("sidebar button failed to toggle the view or persist its state")
+			}
+			if _, ok := tt.Find("会话侧栏"); !ok {
+				t.Fatal("sidebar button disappeared with the sidebar")
+			}
+		}
 		if err := tt.Click("会话"); err != nil {
 			t.Fatal(err)
 		}

@@ -111,6 +111,22 @@ func (g *Gesture) Press(t *Terminal, ref GridRef, x, y float64, ns uint64) (Sele
 	return g.apply(t, g.press)
 }
 
+// PressCount starts an explicitly chosen cell/word/line gesture, retaining
+// Ghostty's word-aware drag and soft-wrap handling after the final press.
+func (g *Gesture) PressCount(t *Terminal, ref GridRef, x, y float64, ns uint64, count int) (Selection, bool) {
+	g.Reset(t)
+	count = max(1, min(count, 3))
+	var selection Selection
+	var ok bool
+	for i := 0; i < count; i++ {
+		selection, ok = g.Press(t, ref, x, y, ns+uint64(i))
+		if i+1 < count {
+			g.Release(t, &ref)
+		}
+	}
+	return selection, ok
+}
+
 // Drag moves the pressed pointer to cell ref at x, y pixels, selecting a
 // rectangle when rect is set.
 func (g *Gesture) Drag(t *Terminal, ref GridRef, x, y float64, geo Geometry, rect bool) (Selection, bool) {
