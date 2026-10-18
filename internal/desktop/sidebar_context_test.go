@@ -26,11 +26,17 @@ func sidebarContextFixture(t *testing.T) (*App, *ui.Tester) {
 	a.managerSelection.Add("unrelated-id")
 	a.revealSidebar(p.ID)
 	a.revealSidebar("link:reference")
-	tt := ui.NewTester(func(c *ui.Context) {
-		a.sidebarView(c)
+	tt := sidebarContextTester(a)
+	return a, tt
+}
+
+func sidebarContextTester(a *App) *ui.Tester {
+	return ui.NewTester(func(c *ui.Context) {
+		// Match the workspace's stretching row so the sidebar scroll area has
+		// height and pointer events reach the visible tree items.
+		ui.Row(c).Fill().AlignItems(ui.Stretch).Children(func() { a.sidebarView(c) })
 		a.sidebarRenameDialog(c)
 	}, 500, 600)
-	return a, tt
 }
 
 func TestSidebarContextSessionActionsIgnoreManagerSelection(t *testing.T) {
@@ -115,7 +121,7 @@ func TestSidebarClipboardRebindsPasswordAndPreservesManager(t *testing.T) {
 	a, _ := managerClipboardFixture(t)
 	source := a.config.Profiles[0]
 	a.managerGroup, a.query, a.managerAll = "elsewhere", "unrelated", true
-	tt := ui.NewTester(a.sidebarView, 400, 500)
+	tt := sidebarContextTester(a)
 	if err := tt.RightClick(source.Name); err != nil {
 		t.Fatal(err)
 	}
