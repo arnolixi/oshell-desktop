@@ -1,0 +1,28 @@
+name: Profile core race tests
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  profile:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, ubuntu-24.04]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - name: Record every core test with production crypto and race detection
+        shell: bash
+        run: go test -race -json -count=1 -timeout=30m ./internal/core > core-race-${{ runner.os }}.jsonl
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: core-profile-${{ runner.os }}
+          path: core-race-*.jsonl
+          if-no-files-found: error
+          retention-days: 14
