@@ -100,6 +100,7 @@ jobs:
         shell: powershell -NoProfile -ExecutionPolicy Bypass -File {0}
         run: |
           $ErrorActionPreference = 'Stop'
+          $ProgressPreference = 'SilentlyContinue'
           if ($env:RUNNER_NAME -ne 'LAPTOP-NGQ35G2T') { throw 'Unexpected Windows runner' }
           # Scope script execution to this CI process; leave machine/user policies intact.
           # A fresh self-hosted runner may have only Windows PowerShell 5.1.
@@ -115,6 +116,9 @@ jobs:
         with:
           persist-credentials: false
       - uses: actions/setup-python@v5
+        env:
+          # setup-python launches Windows PowerShell itself; scope the policy to its children.
+          PSExecutionPolicyPreference: Bypass
         with:
           python-version: '3.12'
       - uses: actions/download-artifact@v4
