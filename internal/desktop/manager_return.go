@@ -10,12 +10,14 @@ type managerReturnState struct {
 	group, query, protocol string
 	searchScope            string
 	all                    bool
+	sidebar                bool
 	ids                    []string
 	target                 string
 }
 
 func (a *App) captureManagerReturn() *managerReturnState {
 	state := &managerReturnState{group: a.managerGroup, query: a.query, protocol: a.managerProtocol, all: a.managerAll, searchScope: a.managerSearchScope}
+	state.sidebar = a.sidebar.context != nil
 	for _, row := range a.selectedManagerRows() {
 		state.ids = append(state.ids, row.id)
 	}
@@ -49,6 +51,10 @@ func (a *App) restoreManagerReturn(saved *core.Profile) {
 		return
 	}
 	a.features.managerReturn = nil
+	if state.sidebar {
+		a.revealSidebar(state.target)
+		return
+	}
 	a.managerGroup = state.group
 	a.managerAll = state.all
 	a.managerSearchScope = state.searchScope

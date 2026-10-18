@@ -91,8 +91,8 @@ func (a *App) pasteManagerConfigurations(c *ui.Context) {
 		a.status = "粘贴失败：密码库或代理配置已变化，请重新复制"
 		return
 	}
-	destination := a.managerGroup
-	if a.managerAll {
+	destination := a.sessionActionGroup()
+	if a.sidebar.context == nil && a.managerAll {
 		destination = ""
 	}
 	if destination != "" {

@@ -216,6 +216,7 @@ func (a *App) featureDialogs(c *ui.Context) {
 	a.proxyManagerDialog(c)
 	a.quickSwitchDialog(c)
 	a.quickCommandDialog(c)
+	a.sidebarRenameDialog(c)
 	ui.Modal(c, &f.directoryOpen, func() {
 		ui.Column(c).Width(470).Gap(12).Children(func() {
 			ui.Text(c, f.directoryAction).FontSize(18).Bold()
@@ -254,6 +255,7 @@ func (a *App) openCommands() {
 	a.features.commandsOpen = true
 }
 func (a *App) openDirectory(action, source string) {
+	a.features.directorySidebar = a.sidebar.context != nil
 	a.features.directoryRows = nil
 	if action == "移动所选会话" || action == "移动实际会话" {
 		a.features.directoryRows = append([]sessionRow(nil), a.selectedManagerRows()...)
@@ -345,6 +347,19 @@ func (a *App) applyDirectory() {
 	})
 	if ok {
 		f.directoryOpen = false
+		if f.directorySidebar {
+			a.sidebar.query = ""
+			destination := f.directoryName
+			if f.directoryAction == "新建目录" {
+				destination, _ = core.LinkFolderChild(f.directorySource, f.directoryName)
+			}
+			if len(f.directoryRows) == 1 && !f.directoryRows[0].folder {
+				a.revealSidebar(f.directoryRows[0].id)
+			} else if directory, err := core.NormalizeDirectory(destination); err == nil {
+				a.revealSidebar("folder:" + directory)
+			}
+			return
+		}
 		a.managerRow = -1
 		a.managerSelection.Clear()
 		a.openManager()

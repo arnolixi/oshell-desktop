@@ -92,6 +92,8 @@ type sidebarState struct {
 	capture         bool
 	query, selected string
 	open            map[string]*bool
+	context         *sidebarMenuContext
+	rename          *managerRenameState
 }
 
 func (a *App) localSelectionSettings(c *ui.Context) {
@@ -205,7 +207,9 @@ func (a *App) sidebarView(c *ui.Context) {
 		for p := range children {
 			sort.Strings(children[p])
 		}
-		ui.Scroll(c).Grow(1).MinHeight(0).Children(func() {
+		ui.Scroll(c).Label("会话侧栏列表").Grow(1).MinHeight(0).ContextMenu(func(m *ui.Menu) {
+			a.sidebarContextMenu(c, m, "")
+		}).Children(func() {
 			ui.Tree(c, func() {
 				var draw func(string)
 				draw = func(group string) {
@@ -221,25 +225,18 @@ func (a *App) sidebarView(c *ui.Context) {
 						if s.query != "" {
 							open = &searched
 						}
-						ui.TreeItem(c.Key("dir:"+child), path.Base(child), open, func() { draw(child) }).Tooltip("/" + child)
+						id := "folder:" + child
+						item := ui.TreeItem(c.Key("dir:"+child), path.Base(child), open, func() { draw(child) }).Selected(s.selected == id).Tooltip("/" + child)
+						a.sidebarItemActions(c, item, id)
 					}
 					for _, entry := range entries {
 						if entry.group == group {
 							e := entry
 							item := ui.TreeItem(c.Key(e.id), e.name, nil, nil).Selected(s.selected == e.id).Tooltip(core.SessionSearchMetadata(e.profile))
-							if item.Clicked() {
-								s.selected = e.id
-							}
+							a.sidebarItemActions(c, item, e.id)
 							if item.DoubleClicked() {
 								a.request(e.profile, 0)
 							}
-							item.HandleInput(func(ev ui.InputEvent) bool {
-								if ev.Kind == ui.InputKeyDown && ev.Key == ui.KeyEnter {
-									a.request(e.profile, 0)
-									return true
-								}
-								return false
-							})
 						}
 					}
 				}

@@ -8,6 +8,9 @@ import (
 )
 
 func (a *App) selectManagerContext(id string) (sessionRow, bool) {
+	if context := a.sidebar.context; context != nil {
+		return context.row, context.valid && context.row.id == id
+	}
 	for i, r := range a.managerRows() {
 		if r.id != id {
 			continue
@@ -30,6 +33,7 @@ func (a *App) selectManagerContext(id string) (sessionRow, bool) {
 }
 func (a *App) managerContextMenu(c *ui.Context, m *ui.Menu, id string) {
 	r, valid := a.selectManagerContext(id)
+	group := a.sessionActionGroup()
 	if valid && r.parent {
 		if m.Item("上一级").Chosen() {
 			a.enterRow(r)
@@ -48,7 +52,7 @@ func (a *App) managerContextMenu(c *ui.Context, m *ui.Menu, id string) {
 			return
 		}
 		if m.Item("移动到…").Disabled(!mutable).Chosen() {
-			a.openDirectory("移动所选会话", a.managerGroup)
+			a.openDirectory("移动所选会话", group)
 			return
 		}
 		actual := mutable
@@ -58,7 +62,7 @@ func (a *App) managerContextMenu(c *ui.Context, m *ui.Menu, id string) {
 			}
 		}
 		if m.Item("移动实际会话到…").Disabled(!actual).Chosen() {
-			a.openDirectory("移动实际会话", a.managerGroup)
+			a.openDirectory("移动实际会话", group)
 			return
 		}
 		if m.Item(fmt.Sprintf("删除所选（%d）…", len(chosen))).Disabled(!mutable || a.passwordLocked()).Chosen() {
@@ -118,13 +122,13 @@ func (a *App) managerContextMenu(c *ui.Context, m *ui.Menu, id string) {
 					return
 				}
 				if m.Item("移动实际会话到…").Chosen() {
-					a.openDirectory("移动实际会话", a.managerGroup)
+					a.openDirectory("移动实际会话", group)
 					return
 				}
 			}
 		}
 		if m.Item("移动到…").Disabled(!mutable).Chosen() {
-			a.openDirectory("移动所选会话", a.managerGroup)
+			a.openDirectory("移动所选会话", group)
 			return
 		}
 		title := "删除…"
@@ -137,9 +141,9 @@ func (a *App) managerContextMenu(c *ui.Context, m *ui.Menu, id string) {
 		}
 		m.Separator()
 	}
-	if a.managerGroup == "Links" || strings.HasPrefix(a.managerGroup, "Links/") {
+	if group == "Links" || strings.HasPrefix(group, "Links/") {
 		if m.Item("添加已有会话链接…").Disabled(len(a.config.Profiles) == 0).Chosen() {
-			a.addExistingLink(strings.TrimPrefix(strings.TrimPrefix(a.managerGroup, "Links"), "/"))
+			a.addExistingLink(strings.TrimPrefix(strings.TrimPrefix(group, "Links"), "/"))
 			return
 		}
 	}
@@ -150,7 +154,7 @@ func (a *App) managerContextMenu(c *ui.Context, m *ui.Menu, id string) {
 		}
 	}
 	if m.Item("新建目录…").Chosen() {
-		a.openDirectory("新建目录", a.managerGroup)
+		a.openDirectory("新建目录", group)
 		return
 	}
 	if m.Item("会话默认属性…").Chosen() {

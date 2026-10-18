@@ -52,6 +52,7 @@ func (a *App) importProfiles() {
 		a.status = "错误：配置正在写入，请稍后重试"
 		return
 	}
+	destination := a.sessionActionGroup()
 	go func() {
 		paths, e := mygo.Dialog.Open(mygo.OpenDialogOptions{Parent: a.win, Title: "导入 OShell 会话", Filters: []mygo.FileFilter{{Name: "OShell 会话", Extensions: []string{"json"}}}})
 		if e != nil {
@@ -71,7 +72,7 @@ func (a *App) importProfiles() {
 			a.report(e)
 			return
 		}
-		a.post(func() { a.features.archive = archiveState{open: true, archive: archive, directory: a.managerGroup} })
+		a.post(func() { a.features.archive = archiveState{open: true, archive: archive, directory: destination} })
 	}()
 }
 func (a *App) exportProfiles() {

@@ -28,6 +28,7 @@ type featureState struct {
 	commandRow                                                                                              int
 	commandList                                                                                             ui.ListState
 	directoryRows                                                                                           []sessionRow
+	directorySidebar                                                                                        bool
 	directoryPicker                                                                                         directoryPickerState
 	sessionPassword                                                                                         sessionPasswordEditor
 	linkEditor                                                                                              linkEditorState

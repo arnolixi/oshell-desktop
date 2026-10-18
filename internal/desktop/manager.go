@@ -141,6 +141,10 @@ func (a *App) buildManagerRows() []sessionRow {
 }
 func (a *App) enterRow(row sessionRow) {
 	if row.folder {
+		if a.sidebar.context != nil {
+			a.revealSidebar(row.id)
+			return
+		}
 		a.navigateManager(row.group)
 		return
 	}

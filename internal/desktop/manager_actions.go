@@ -14,6 +14,12 @@ import (
 )
 
 func (a *App) selectedManagerRows() []sessionRow {
+	if context := a.sidebar.context; context != nil {
+		if context.valid {
+			return []sessionRow{context.row}
+		}
+		return nil
+	}
 	rows := a.managerRows()
 	var chosen []sessionRow
 	for _, r := range rows {
@@ -80,6 +86,7 @@ func (a *App) copyManagerProfiles(originals []core.Profile, destination *string,
 	vault := a.vault
 	vaultRevision := vault.Revision()
 	candidate := a.config.Clone()
+	fromSidebar := a.sidebar.context != nil
 	a.setConfigurationBusy(true)
 	go func() {
 		var updates []core.CredentialUpdate
@@ -143,29 +150,38 @@ func (a *App) copyManagerProfiles(originals []core.Profile, destination *string,
 			if a.hub != nil {
 				a.hub.scheduleSharedSync(2 * time.Second)
 			}
-			a.query = ""
-			if destination != nil {
-				a.managerGroup, a.managerAll = *destination, false
-				a.managerProtocol, a.managerLastProtocol = "", ""
-			} else if len(copied) == 1 {
+			if fromSidebar {
 				for _, profile := range candidate.Profiles {
 					if copied[profile.ID] {
-						a.managerGroup = profile.Group
-						a.managerAll = false
+						a.revealSidebar(profile.ID)
 						break
 					}
 				}
 			} else {
-				a.managerAll = true
-			}
-			a.managerSelection.Clear()
-			a.managerRow = -1
-			for i, row := range a.managerRows() {
-				if copied[row.profile.ID] && row.linkID == "" {
-					a.managerSelection.Add(row.id)
-					if a.managerRow < 0 {
-						a.managerRow = i
-						a.selected = row.profile.ID
+				a.query = ""
+				if destination != nil {
+					a.managerGroup, a.managerAll = *destination, false
+					a.managerProtocol, a.managerLastProtocol = "", ""
+				} else if len(copied) == 1 {
+					for _, profile := range candidate.Profiles {
+						if copied[profile.ID] {
+							a.managerGroup = profile.Group
+							a.managerAll = false
+							break
+						}
+					}
+				} else {
+					a.managerAll = true
+				}
+				a.managerSelection.Clear()
+				a.managerRow = -1
+				for i, row := range a.managerRows() {
+					if copied[row.profile.ID] && row.linkID == "" {
+						a.managerSelection.Add(row.id)
+						if a.managerRow < 0 {
+							a.managerRow = i
+							a.selected = row.profile.ID
+						}
 					}
 				}
 			}

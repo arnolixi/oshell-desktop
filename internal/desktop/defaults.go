@@ -9,7 +9,7 @@ import (
 )
 
 func (a *App) newProfile(kind string) core.Profile {
-	return a.config.SessionDefaults.MakeProfile(kind, a.managerGroup)
+	return a.config.SessionDefaults.MakeProfile(kind, a.sessionActionGroup())
 }
 func (a *App) showDefaults() {
 	a.closeManager()

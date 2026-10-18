@@ -12,6 +12,7 @@ import (
 type managerRenameState struct {
 	row     sessionRow
 	name    string
+	error   string
 	focused bool
 }
 
@@ -19,24 +20,35 @@ func (a *App) beginManagerRename(r sessionRow) {
 	if r.parent || r.folder && r.group == "Links" || a.configurationBusy() || a.passwordLocked() {
 		return
 	}
-	a.managerRename = &managerRenameState{row: r, name: r.name}
+	state := &managerRenameState{row: r, name: r.name}
+	if a.sidebar.context != nil {
+		a.sidebar.rename = state
+	} else {
+		a.managerRename = state
+	}
 }
 func (a *App) commitManagerRename() {
 	state := a.managerRename
 	if state == nil {
 		return
 	}
-	name := strings.TrimSpace(state.name)
-	r := state.row
+	if a.renameSessionRow(state.row, state.name) {
+		a.managerRename = nil
+		a.managerSelection.Clear()
+		a.managerRow = -1
+	}
+}
+
+func (a *App) renameSessionRow(r sessionRow, name string) bool {
+	name = strings.TrimSpace(name)
 	if name == "" || strings.ContainsAny(name, "/\\") || strings.ContainsFunc(name, unicode.IsControl) || name == "." || name == ".." {
 		a.status = "错误：名称不能为空或包含路径分隔符"
-		return
+		return false
 	}
 	if name == r.name {
-		a.managerRename = nil
-		return
+		return true
 	}
-	if a.changeConfig(func(cfg *core.Config) error {
+	return a.changeConfig(func(cfg *core.Config) error {
 		if r.folder {
 			return cfg.MoveDirectory(r.group, path.Join(managerParent(r.group), name))
 		}
@@ -56,11 +68,7 @@ func (a *App) commitManagerRename() {
 			}
 		}
 		return fmt.Errorf("项目已变化，请重新选择")
-	}) {
-		a.managerRename = nil
-		a.managerSelection.Clear()
-		a.managerRow = -1
-	}
+	})
 }
 func (a *App) managerNameEditor(c *ui.Context, r sessionRow) bool {
 	s := a.managerRename
