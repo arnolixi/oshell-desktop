@@ -20,6 +20,7 @@ var (
 	chevronIcon  = glyph(`<path d="m6 8 4 4 4-4"/>`)
 	arrowUpIcon  = glyph(`<path d="m5 10 5-5 5 5m-5-5v11"/>`)
 	searchIcon   = glyph(`<circle cx="8.5" cy="8.5" r="5"/><path d="m12 12 5 5"/>`)
+	editIcon     = glyph(`<path d="m12.5 3.5 4 4M3.5 16.5l1-4 9-9a2.1 2.1 0 0 1 3 3l-9 9z"/>`)
 )
 
 func toolButton(c *ui.Context, label string, icon *ui.SVG, text string) ui.Element {
@@ -34,4 +35,17 @@ func toolButton(c *ui.Context, label string, icon *ui.SVG, text string) ui.Eleme
 }
 func flatButton(c *ui.Context, label string, icon *ui.SVG, text string) ui.Element {
 	return toolButton(c, label, icon, text).Background(ui.Transparent).BorderWidth(0)
+}
+
+func rowIconButton(c *ui.Context, label string, icon *ui.SVG, foreground ui.Color) ui.Element {
+	button := ui.ButtonBase(c).Role(ui.RoleButton).Label(label).Tooltip(label).
+		Size(28, 28).Radius(5).Cursor(ui.CursorPointer)
+	if button.Pressed() {
+		button.Background(foreground.Alpha(.20))
+	} else if button.Hovered() || button.FocusVisible() {
+		button.Background(foreground.Alpha(.12))
+	}
+	return button.Children(func() {
+		ui.Icon(c, icon).FontSize(16).TextColor(foreground)
+	})
 }
