@@ -12,7 +12,9 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -42,15 +44,23 @@ func (e *SyncFailure) Error() string {
 	case "etag":
 		return "服务器未提供强 ETag，无法安全同步"
 	case "redirect":
-		return "同步地址发生重定向，请填写最终 HTTPS 地址"
+		return "同步地址发生重定向，请填写最终 HTTP / HTTPS 地址"
 	case "size":
 		return "同步数据超过大小限制"
+	case "tls":
+		return "WebDAV TLS 证书校验失败，请核对服务端证书"
+	case "tls-changed":
+		return "WebDAV 服务端或证书已改变，请重新核对并确认"
+	case "tls-validity":
+		return "WebDAV 证书已过期或尚未生效，不能信任"
 	case "network":
 		return "同步网络请求失败或超时，本地数据保留"
 	case "unencrypted":
 		return "共享文件未加密或格式无效，未覆盖"
 	case "directory":
 		return "同步目录不可用或包含本机密钥，本地数据保留"
+	case "webdav-directory":
+		return "WebDAV 同步位置不是可访问的目录，或服务端目录响应无效；未写入同步数据"
 	case "file-conflict":
 		return "同步目录存在未解决的文件级冲突，请先保留并处理冲突副本"
 	}
@@ -71,19 +81,38 @@ func ValidETag(tag string) bool {
 }
 
 type WebDAVTransport struct {
+	resolveMu          sync.Mutex
+	resolvedDirectory  *url.URL
 	directory          *url.URL
 	username, password string
 	client             *http.Client
 }
 
-func NewWebDAVTransport(address, username, password string, allowLoopbackHTTP bool) (*WebDAVTransport, error) {
+// IsHTTPWebDAV identifies an explicit plaintext draft for transport warnings.
+func IsHTTPWebDAV(address string) bool {
+	u, err := url.Parse(strings.TrimSpace(address))
+	return err == nil && strings.EqualFold(u.Scheme, "http")
+}
+
+// The final argument is retained for callers of the former loopback-only HTTP API.
+// An explicit HTTP address opts into plaintext transport for WebDAV alone.
+func NewWebDAVTransport(address, username, password string, _ bool) (*WebDAVTransport, error) {
 	u, e := url.Parse(strings.TrimSpace(address))
-	if e != nil || u.Hostname() == "" || u.User != nil || u.RawQuery != "" || u.Fragment != "" || strings.ContainsAny(username, ":\r\n") || strings.ContainsAny(password, "\r\n") {
-		return nil, fmt.Errorf("请输入有效 HTTPS 目录地址，账号密码填写在单独字段")
+	invalid := func() (*WebDAVTransport, error) {
+		return nil, fmt.Errorf("请输入有效 HTTP / HTTPS 目录地址和端口，账号密码填写在单独字段（最多 4096 字节，不含换行或空字符）")
 	}
-	loopback := u.Hostname() == "localhost" || u.Hostname() == "127.0.0.1" || u.Hostname() == "::1"
-	if u.Scheme != "https" && !(allowLoopbackHTTP && loopback && u.Scheme == "http") {
-		return nil, fmt.Errorf("同步要求 HTTPS")
+	if e != nil || u.Hostname() == "" || u.Opaque != "" || u.User != nil || u.RawQuery != "" || u.ForceQuery || strings.Contains(address, "#") || len(username) > 4096 || len(password) > 4096 || strings.ContainsAny(username, ":\r\n\x00") || strings.ContainsAny(password, "\r\n\x00") {
+		return invalid()
+	}
+	u.Scheme = strings.ToLower(u.Scheme)
+	if u.Scheme != "https" && u.Scheme != "http" || strings.HasSuffix(u.Host, ":") {
+		return invalid()
+	}
+	if port := u.Port(); port != "" {
+		n, err := strconv.Atoi(port)
+		if err != nil || n < 1 || n > 65535 {
+			return invalid()
+		}
 	}
 	if !strings.HasSuffix(u.Path, "/") {
 		u.Path += "/"
@@ -92,16 +121,9 @@ func NewWebDAVTransport(address, username, password string, allowLoopbackHTTP bo
 		u.RawPath += "/"
 	}
 	client := &http.Client{Timeout: 45 * time.Second, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
-	return &WebDAVTransport{u, username, password, client}, nil
+	return &WebDAVTransport{directory: u, username: username, password: password, client: client}, nil
 }
-func (w *WebDAVTransport) request(ctx context.Context, method string, body []byte, headers map[string]string, directory bool) (int, http.Header, []byte, error) {
-	target := *w.directory
-	if !directory {
-		target.Path += "oshell-vault.json"
-		if target.RawPath != "" {
-			target.RawPath += "oshell-vault.json"
-		}
-	}
+func (w *WebDAVTransport) request(ctx context.Context, method string, target *url.URL, body []byte, headers map[string]string) (int, http.Header, []byte, error) {
 	req, e := http.NewRequestWithContext(ctx, method, target.String(), bytes.NewReader(body))
 	if e != nil {
 		return 0, nil, nil, safeSyncFailure("network")
@@ -117,7 +139,7 @@ func (w *WebDAVTransport) request(ctx context.Context, method string, body []byt
 		if ctx.Err() != nil {
 			return 0, nil, nil, ctx.Err()
 		}
-		return 0, nil, nil, safeSyncFailure("network")
+		return 0, nil, nil, webDAVRequestFailure(e)
 	}
 	defer response.Body.Close()
 	if response.StatusCode == 401 || response.StatusCode == 403 {
@@ -131,6 +153,9 @@ func (w *WebDAVTransport) request(ctx context.Context, method string, body []byt
 	}
 	data, e := io.ReadAll(io.LimitReader(response.Body, MaxSharedVault+1))
 	if e != nil {
+		if ctx.Err() != nil {
+			return 0, nil, nil, ctx.Err()
+		}
 		return 0, nil, nil, safeSyncFailure("network")
 	}
 	if len(data) > MaxSharedVault {
@@ -139,18 +164,18 @@ func (w *WebDAVTransport) request(ctx context.Context, method string, body []byt
 	return response.StatusCode, response.Header, data, nil
 }
 func (w *WebDAVTransport) Probe(ctx context.Context) error {
-	status, _, _, e := w.request(ctx, "PROPFIND", []byte(`<?xml version="1.0"?><d:propfind xmlns:d="DAV:"><d:prop><d:resourcetype/></d:prop></d:propfind>`), map[string]string{"Depth": "0", "Content-Type": "application/xml; charset=utf-8"}, true)
-	if e != nil {
-		return e
-	}
-	if status != 207 {
-		return &SyncFailure{Kind: "status", Status: status}
-	}
-	_, e = w.Fetch(ctx)
+	_, e := w.Fetch(ctx)
 	return e
 }
 func (w *WebDAVTransport) Fetch(ctx context.Context) (*SharedObject, error) {
-	status, headers, data, e := w.request(ctx, "GET", nil, nil, false)
+	directory, err := w.SyncDirectory(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return w.fetchIn(ctx, directory)
+}
+func (w *WebDAVTransport) fetchIn(ctx context.Context, directory *url.URL) (*SharedObject, error) {
+	status, headers, data, e := w.request(ctx, "GET", webDAVChild(directory, "oshell-vault.json"), nil, nil)
 	if e != nil {
 		return nil, e
 	}
@@ -185,7 +210,11 @@ func (w *WebDAVTransport) Put(ctx context.Context, data []byte, etag string) err
 		}
 		headers["If-Match"] = etag
 	}
-	status, _, _, e := w.request(ctx, "PUT", data, headers, false)
+	directory, e := w.SyncDirectory(ctx)
+	if e != nil {
+		return e
+	}
+	status, _, _, e := w.request(ctx, "PUT", webDAVChild(directory, "oshell-vault.json"), data, headers)
 	if e != nil {
 		return e
 	}

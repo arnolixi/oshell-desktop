@@ -408,78 +408,66 @@ func (r *receiver) readOOBestEffort() {
 // Each valid header determines the CRC width of its following subpackets.
 func (r *receiver) readHeader() (byte, uint32, error) {
 	for {
-		b, err := r.reader.readByte(receiveTimeout)
+		b, err := r.readWireByte()
 		if err != nil {
 			return 0, 0, err
 		}
 		if b != ZPAD {
 			continue
 		}
-		// One ZPAD seen — peek ahead.
-		b2, err := r.reader.readByte(receiveTimeout)
+		// Padding is independent of the header encoding. Resynchronization can
+		// leave one or several pads before either a binary or a hex header.
+		for b == ZPAD {
+			b, err = r.readWireByte()
+			if err != nil {
+				return 0, 0, err
+			}
+		}
+		if b != ZDLE {
+			continue
+		}
+		format, err := r.readWireByte()
 		if err != nil {
 			return 0, 0, err
 		}
-		switch {
-		case b2 == ZPAD:
-			// ZHEX form: ZPAD ZPAD ZDLE 'B' <14 hex chars> CR LF [XON]
-			b3, err := r.reader.readByte(receiveTimeout)
-			if err != nil {
-				return 0, 0, err
-			}
-			if b3 != ZDLE {
-				continue
-			}
-			b4, err := r.reader.readByte(receiveTimeout)
-			if err != nil {
-				return 0, 0, err
-			}
-			if b4 != ZHEX {
-				continue
-			}
-			frame, count, ok, err := r.readHexBody()
-			if err != nil {
-				return 0, 0, err
-			}
-			if !ok {
-				continue
-			}
-			r.crc32Mode = false
-			r.hexTrailer = true
-			return frame, count, nil
-		case b2 == ZDLE:
-			b3, err := r.reader.readByte(receiveTimeout)
-			if err != nil {
-				return 0, 0, err
-			}
-			switch b3 {
-			case ZBIN:
-				frame, count, ok, err := r.readBinBody(false)
-				if err != nil {
-					return 0, 0, err
-				}
-				if !ok {
-					continue
-				}
-				r.crc32Mode = false
-				r.hexTrailer = false
-				return frame, count, nil
-			case ZBIN32:
-				frame, count, ok, err := r.readBin32Body()
-				if err != nil {
-					return 0, 0, err
-				}
-				if !ok {
-					continue
-				}
-				r.crc32Mode = true
-				r.hexTrailer = false
-				return frame, count, nil
-			default:
-				continue
-			}
+		var frame byte
+		var count uint32
+		var ok bool
+		switch format {
+		case ZHEX:
+			frame, count, ok, err = r.readHexBody()
+		case ZBIN:
+			frame, count, ok, err = r.readBinBody(false)
+		case ZBIN32:
+			frame, count, ok, err = r.readBin32Body()
 		default:
-			// Spurious ZPAD; keep scanning.
+			continue
+		}
+		if err != nil {
+			return 0, 0, err
+		}
+		if !ok {
+			continue
+		}
+		r.crc32Mode = format == ZBIN32
+		r.hexTrailer = format == ZHEX
+		return frame, count, nil
+	}
+}
+
+// XON/XOFF are out-of-band, including between ZDLE and its escaped byte.
+// Filter only wire bytes: an escaped XON/XOFF in file content is data.
+func (r *receiver) readWireByte() (byte, error) {
+	for {
+		b, err := r.reader.readByte(receiveTimeout)
+		if err != nil {
+			return 0, err
+		}
+		switch b {
+		case 0x11, 0x13, 0x91, 0x93:
+			continue
+		default:
+			return b, nil
 		}
 	}
 }
@@ -490,7 +478,7 @@ func (r *receiver) readHeader() (byte, uint32, error) {
 func (r *receiver) readHexBody() (byte, uint32, bool, error) {
 	hex := make([]byte, 14)
 	for i := range hex {
-		b, err := r.reader.readByte(receiveTimeout)
+		b, err := r.readWireByte()
 		if err != nil {
 			return 0, 0, false, err
 		}
@@ -574,12 +562,12 @@ func (r *receiver) readBinBody(_ bool) (byte, uint32, bool, error) {
 func (r *receiver) readEscapedBytes(n int) ([]byte, error) {
 	out := make([]byte, 0, n)
 	for len(out) < n {
-		b, err := r.reader.readByte(receiveTimeout)
+		b, err := r.readWireByte()
 		if err != nil {
 			return nil, err
 		}
 		if b == ZDLE {
-			b2, err := r.reader.readByte(receiveTimeout)
+			b2, err := r.readWireByte()
 			if err != nil {
 				return nil, err
 			}
@@ -625,12 +613,12 @@ func (r *receiver) readSubpacket() ([]byte, byte, error) {
 	// consume it explicitly without including it in the payload or CRC.
 	if r.hexTrailer {
 		r.hexTrailer = false
-		for i := 0; i < 3; i++ {
-			b, err := r.reader.readByte(receiveTimeout)
+		for i := 0; i < 2; i++ {
+			b, err := r.readWireByte()
 			if err != nil {
 				return nil, 0, err
 			}
-			if (i == 0 && b == '\r') || (i == 1 && (b == '\n' || b == 0x8a)) || (i == 2 && b == XON) {
+			if (i == 0 && b == '\r') || (i == 1 && (b == '\n' || b == 0x8a)) {
 				continue
 			}
 			r.reader.unread([]byte{b})
@@ -642,7 +630,7 @@ func (r *receiver) readSubpacket() ([]byte, byte, error) {
 		if len(data) > 1<<20 {
 			return nil, 0, errSubpacketTooLarge
 		}
-		b, err := r.reader.readByte(receiveTimeout)
+		b, err := r.readWireByte()
 		if err != nil {
 			return nil, 0, err
 		}
@@ -650,7 +638,7 @@ func (r *receiver) readSubpacket() ([]byte, byte, error) {
 			data = append(data, b)
 			continue
 		}
-		b2, err := r.reader.readByte(receiveTimeout)
+		b2, err := r.readWireByte()
 		if err != nil {
 			return nil, 0, err
 		}

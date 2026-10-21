@@ -92,8 +92,42 @@ type sidebarState struct {
 	capture         bool
 	query, selected string
 	open            map[string]*bool
+	filteredQuery   string
+	filteredOpen    map[string]*bool
 	context         *sidebarMenuContext
 	rename          *managerRenameState
+}
+
+func (s *sidebarState) expansion() map[string]*bool {
+	query := strings.TrimSpace(s.query)
+	if s.filteredQuery != query {
+		s.filteredQuery = query
+		s.filteredOpen = nil
+	}
+	if query != "" {
+		if s.filteredOpen == nil {
+			s.filteredOpen = map[string]*bool{}
+		}
+		return s.filteredOpen
+	}
+	if s.open == nil {
+		s.open = map[string]*bool{}
+	}
+	return s.open
+}
+
+func (a *App) setSidebarExpanded(expanded bool) {
+	state := a.sidebar.expansion()
+	_, folders := sidebarEntries(a.config, strings.TrimSpace(a.sidebar.query))
+	for folder := range folders {
+		if folder == "" {
+			continue
+		}
+		if state[folder] == nil {
+			state[folder] = new(bool)
+		}
+		*state[folder] = expanded
+	}
 }
 
 func (a *App) localSelectionSettings(c *ui.Context) {
@@ -188,12 +222,17 @@ func (a *App) sidebarView(c *ui.Context) {
 		s.open = map[string]*bool{}
 	}
 	ui.Column(c).Width(235).MinWidth(150).MinHeight(0).BorderWidth(0, 1, 0, 0).BorderColor(c.Theme().Border).Children(func() {
-		ui.Row(c).Padding(6).Children(func() {
-			ui.Text(c, "会话").Bold().Grow(1)
-			ui.Button(c, "管理").OnClick(a.openManager)
-			ui.Button(c, "×").Label("隐藏会话侧栏").OnClick(a.toggleSidebar)
+		ui.Row(c).Padding(6, 8).Gap(2).AlignItems(ui.Center).Children(func() {
+			ui.Text(c, "会话").FontSize(13).Bold().Grow(1)
+			rowIconButton(c, "管理会话", settingsIcon, c.Theme().Accent).Tooltip("打开会话管理").OnClick(a.openManager)
+			rowIconButton(c, "隐藏会话侧栏", collapseSidebarIcon, c.Theme().TextMuted).Tooltip("收起会话侧栏").OnClick(a.toggleSidebar)
 		})
 		ui.TextInput(c, &s.query).Label("搜索会话侧栏").Placeholder("名称 / 主机 / 用户 / 端口 / 目录").FillWidth()
+		ui.Row(c).Padding(4, 8).Gap(4).Children(func() {
+			ui.Button(c, "全部展开").Height(24).FontSize(11).Padding(2, 6).BorderWidth(0).Tooltip("展开所有目录；搜索时仅操作当前结果").OnClick(func() { a.setSidebarExpanded(true) })
+			ui.Button(c, "全部收缩").Height(24).FontSize(11).Padding(2, 6).BorderWidth(0).Tooltip("收缩所有目录；搜索时仅操作当前结果").OnClick(func() { a.setSidebarExpanded(false) })
+		})
+		expansion := s.expansion()
 		entries, folders := sidebarEntries(a.config, strings.TrimSpace(s.query))
 		children := map[string][]string{}
 		for group := range folders {
@@ -215,25 +254,20 @@ func (a *App) sidebarView(c *ui.Context) {
 				var draw func(string)
 				draw = func(group string) {
 					for _, child := range children[group] {
-						open := s.open[child]
+						open := expansion[child]
 						if open == nil {
-							v := false
+							v := strings.TrimSpace(s.query) != ""
 							open = &v
-							s.open[child] = open
-						}
-						// Search expansion is temporary; clearing the query restores the saved tree.
-						searched := true
-						if s.query != "" {
-							open = &searched
+							expansion[child] = open
 						}
 						id := "folder:" + child
-						item := ui.TreeItem(c.Key("dir:"+child), path.Base(child), open, func() { draw(child) }).Selected(s.selected == id).Tooltip("/" + child)
+						item := sessionTreeItem(c.Key("dir:"+child), path.Base(child), open, func() { draw(child) }, s.selected == id, sessionIconFor("", false, true, false)).Tooltip("/" + child)
 						a.sidebarItemActions(c, item, id)
 					}
 					for _, entry := range entries {
 						if entry.group == group {
 							e := entry
-							item := ui.TreeItem(c.Key(e.id), e.name, nil, nil).Selected(s.selected == e.id).Tooltip(core.SessionSearchMetadata(e.profile))
+							item := sessionTreeItem(c.Key(e.id), e.name, nil, nil, s.selected == e.id, sidebarSessionStyle(e)).Tooltip(sessionListTooltip(e.profile, strings.HasPrefix(e.id, "link:")))
 							a.sidebarItemActions(c, item, e.id)
 							if item.DoubleClicked() {
 								a.request(e.profile, 0)

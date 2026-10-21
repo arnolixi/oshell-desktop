@@ -14,11 +14,19 @@ import (
 )
 
 func TestDataDragAcrossContentWindows(t *testing.T) {
+	for _, operation := range []transfer.Operation{transfer.Copy, transfer.Move} {
+		t.Run(map[transfer.Operation]string{transfer.Copy: "copy", transfer.Move: "move"}[operation], func(t *testing.T) {
+			testDataDragAcrossContentWindows(t, operation)
+		})
+	}
+}
+
+func testDataDragAcrossContentWindows(t *testing.T, operation transfer.Operation) {
 	value := &struct{ Name string }{"original"}
 	var received any
 	var results []transfer.Result
 	w, _, src := contentWindow(t, func(c *ui.Context) {
-		ui.Box(c).Size(100, 50).Drag(value).DragData(transfer.TextData(value.Name), transfer.DragOptions{Done: func(r transfer.Result) { results = append(results, r) }})
+		ui.Box(c).Size(100, 50).Drag(value).DragData(transfer.TextData(value.Name), transfer.DragOptions{Operations: operation, Done: func(r transfer.Result) { results = append(results, r) }})
 	})
 	_, _, dst := contentWindow(t, func(c *ui.Context) {
 		e := ui.Box(c).Size(100, 100)
@@ -36,7 +44,7 @@ func TestDataDragAcrossContentWindows(t *testing.T) {
 			t.Error("native source was not scheduled")
 			return
 		}
-		if r.Operations != transfer.Copy || len(r.Preview) == 0 {
+		if r.Operations != operation || len(r.Preview) == 0 {
 			t.Errorf("request %+v", r)
 		}
 		d := &platform.DataDragEvent{Session: r.Session, Offer: transfer.Offer{Formats: r.Data.Formats(), Operations: r.Operations}}
@@ -54,12 +62,28 @@ func TestDataDragAcrossContentWindows(t *testing.T) {
 			t.Error("registry retained a completed session")
 		}
 	})
-	if received != value || len(results) != 1 || results[0].Operation != transfer.Copy {
+	if received != value || len(results) != 1 || results[0].Operation != operation {
 		t.Fatalf("received %v, results %v", received, results)
 	}
 	w.CancelDataDrag()
 	if len(results) != 1 {
 		t.Fatal("completion called twice")
+	}
+}
+
+func TestDataDragNoTargetIsNotCancellation(t *testing.T) {
+	w, _, s := contentWindow(t, func(c *ui.Context) { ui.Text(c, "source") })
+	var results []transfer.Result
+	if err := w.StartDataDrag(transfer.TextData("tab"), DragOptions{Operations: transfer.Move, Done: func(r transfer.Result) { results = append(results, r) }}); err != nil {
+		t.Fatal(err)
+	}
+	onMain(func() { s.FinishDataDrag(transfer.Result{Operation: transfer.None}) })
+	if len(results) != 1 || results[0].Operation != transfer.None || results[0].Canceled || results[0].Err != nil {
+		t.Fatalf("release outside targets was confused with Escape: %+v", results)
+	}
+	w.CancelDataDrag()
+	if len(results) != 1 {
+		t.Fatal("completed drag notified twice")
 	}
 }
 

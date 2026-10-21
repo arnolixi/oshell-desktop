@@ -26,7 +26,7 @@ type pane struct {
 	localNames             core.LocalHostname
 	visible, pendingUnread atomic.Bool
 	hostname               string
-	transfer               terminalTransferState
+	transfer               transferNoticeState
 	ftp                    *core.FTPSession
 	owner                  atomic.Pointer[App]
 	id                     string
@@ -58,6 +58,8 @@ type tab struct {
 	active   *pane
 }
 type App struct {
+	closeAfterTabMove                               bool
+	tabNativeDrag                                   bool
 	localUI, localUIDraft                           localPreferences
 	sidebar                                         sidebarState
 	storageDirectoryDraft, storageDirectoryOriginal string
@@ -149,6 +151,7 @@ func (a *App) drain() {
 	for _, fn := range pending {
 		fn()
 	}
+	a.finishTabMoveClose()
 	if len(pending) > 0 && a.preferencesWindow != nil {
 		a.preferencesWindow.Invalidate()
 	}
@@ -220,6 +223,11 @@ func (a *App) dispose(p *pane) {
 		return
 	}
 	p.closed = true
+	for _, q := range append([]*authenticationChallenge(nil), a.challenges...) {
+		if q.pane == p {
+			a.finishChallenge(q, true)
+		}
+	}
 	a.cancelHostProbe(p)
 	delete(a.features.syncTargets, p.id)
 	a.pruneSyncTargets()
@@ -745,11 +753,7 @@ func (a *App) openConnection(profile core.Profile, cred core.Credentials, split 
 				dialProfile.Kind = "sftp"
 			}
 			conn, err = core.Dial(ctx, dialProfile, cred, a.trust, func(h core.HostPrompt) bool {
-				if ctx.Err() != nil {
-					return false
-				}
-				r, e := mygo.Dialog.Message(mygo.MessageOptions{Parent: a.win, Type: mygo.MessageWarning, Title: "首次连接：核对服务器指纹", Message: h.Address, Detail: h.Algorithm + "\n" + h.Fingerprint + "\n\n请与服务器管理员提供的指纹核对。信任后将保存到 OShell 的 known_hosts。", Buttons: []string{"取消", "信任并连接"}, DefaultButton: 0, CancelButton: 0})
-				return e == nil && r.Button == 1 && ctx.Err() == nil
+				return askHostAuthentication(ctx, p, h)
 			})
 		}
 		if err != nil {

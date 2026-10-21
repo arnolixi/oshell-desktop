@@ -44,7 +44,7 @@ type SyncSafeFailure struct {
 	Code int    `json:"code,omitempty"`
 }
 
-var syncFailureTitles = map[string]string{"authentication": "认证失败", "remoteChanged": "共享版本已变化", "network": "网络请求失败或超时", "http": "HTTP 响应异常", "invalidData": "配置、密码或加密数据校验失败", "storage": "本地或同步目录读写失败", "cancelled": "请求已取消", "directoryUnavailable": "同步目录暂不可用", "cloudConflict": "存在文件级冲突", "remoteDeleted": "共享同步文件已删除", "encryption": "主密码或加密数据校验失败"}
+var syncFailureTitles = map[string]string{"tls": "TLS 证书校验失败", "authentication": "认证失败", "remoteChanged": "共享版本已变化", "network": "网络请求失败或超时", "http": "HTTP 响应异常", "invalidData": "配置、密码或加密数据校验失败", "storage": "本地或同步目录读写失败", "cancelled": "请求已取消", "directoryUnavailable": "同步目录暂不可用", "cloudConflict": "存在文件级冲突", "remoteDeleted": "共享同步文件已删除", "encryption": "主密码或加密数据校验失败"}
 
 func (f SyncSafeFailure) Title() string { return syncFailureTitles[f.Kind] }
 func safeDiagnosticFailure(err error) *SyncSafeFailure {
@@ -63,13 +63,15 @@ func safeDiagnosticFailure(err error) *SyncSafeFailure {
 	case errors.As(err, &transport):
 		failure.Code = transport.Status
 		switch transport.Kind {
+		case "tls", "tls-changed", "tls-validity":
+			failure.Kind = "tls"
 		case "authentication":
 			failure.Kind = "authentication"
 		case "conflict":
 			failure.Kind = "remoteChanged"
 		case "network":
 			failure.Kind = "network"
-		case "directory":
+		case "directory", "webdav-directory":
 			failure.Kind = "directoryUnavailable"
 		case "file-conflict":
 			failure.Kind = "cloudConflict"
@@ -284,10 +286,60 @@ func SyncLocalFingerprint(store *Store, vault *Vault) string {
 	if store == nil || vault == nil {
 		return ""
 	}
-	revision, err := store.Revision()
+	// Read without accepting a new Store revision: status rendering must never
+	// acknowledge another process's changes on behalf of a future save.
+	store.mu.Lock()
+	data, err := readConfigurationFile(filepath.Join(store.Dir, "config.json"))
+	var cfg Config
+	if err == nil {
+		if store.baseline != nil && store.observedRevision == configurationDigest(data) && (!store.protected || len(store.master) > 0) {
+			cfg = store.baseline.Clone()
+		} else {
+			cfg, _, err = DecodeConfiguration(data, store.master)
+		}
+	}
+	clear(data)
+	store.mu.Unlock()
 	if err != nil {
 		return ""
 	}
-	hash := sha256.Sum256([]byte(revision + ":" + vault.Revision()))
+	vault.mu.Lock()
+	if vault.blocked || vault.data.Master && len(vault.key) == 0 {
+		vault.mu.Unlock()
+		return ""
+	}
+	ids := map[string]bool{}
+	for _, p := range cfg.Profiles {
+		ids[strings.ToUpper(p.ID)] = true
+		if p.Proxy.ID != "" {
+			ids[strings.ToUpper(ProxyCredentialProfile(p.Proxy).ID)] = true
+		}
+	}
+	for _, p := range cfg.Proxies {
+		ids[strings.ToUpper(ProxyCredentialProfile(p.Settings).ID)] = true
+	}
+	entries := map[string]vaultEntry{}
+	for id, entry := range vault.data.Entries {
+		if ids[strings.ToUpper(id)] {
+			entries[id] = entry
+		}
+	}
+	// Hash only session data, their encrypted credentials and master protection.
+	// WebDAV credentials and client-only settings do not make sessions dirty.
+	body, err := json.Marshal(struct {
+		Profiles    []Profile
+		Proxies     []ProxyProfile
+		Directories []string
+		Links       []SessionLink
+		RootOrder   []string
+		Credentials map[string]vaultEntry
+		Master      bool
+		Salt        []byte
+	}{cfg.Profiles, cfg.Proxies, cfg.Directories, cfg.Links, cfg.LinkRootOrder, entries, vault.data.Master, vault.data.Salt})
+	vault.mu.Unlock()
+	if err != nil {
+		return ""
+	}
+	hash := sha256.Sum256(body)
 	return hex.EncodeToString(hash[:])
 }

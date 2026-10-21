@@ -2,6 +2,7 @@ package desktop
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"github.com/egoist/mygo"
 	"github.com/egoist/mygo/ui"
@@ -10,9 +11,11 @@ import (
 )
 
 type sharedSyncState struct {
+	method                               string
 	deferred                             bool
 	deferredBackground                   bool
 	savedOptions                         core.SyncOptions
+	savedVaultRevision                   string
 	directoryChanged                     bool
 	directoryDisabled                    bool
 	directoryGeneration                  uint64
@@ -53,11 +56,20 @@ func (a *App) loadSharedSyncSettings() {
 	f.loaded = true
 	options, e := a.loadSyncOptions()
 	f.options = options
+	f.method = "none"
+	if options.Enabled {
+		f.method = options.Backend
+	}
 	f.savedOptions = options
+	f.savedVaultRevision = a.vault.Revision()
 	f.pendingDirectory, _ = core.LoadPendingSyncDirectory(a.store.Dir)
 	f.directoryChanged = false
 	f.directoryDisabled = false
 	f.savedEnabled = options.Enabled
+	if a.passwordLocked() {
+		status, _ := core.SyncOptionsStatus(a.store.Dir)
+		f.savedEnabled = status.Enabled
+	}
 	f.diagnostics = core.SyncDiagnostics{Directory: a.store.Dir, Target: options.Target(), Backend: options.Backend}
 	a.loadSyncDiagnostics()
 	f.pendingDraft = (core.SharedConflictStore{Directory: a.store.Dir, Target: options.Target()}).Exists()
@@ -68,41 +80,54 @@ func (a *App) loadSharedSyncSettings() {
 func (a *App) sharedSyncSettings(c *ui.Context) {
 	a.loadSharedSyncSettings()
 	f := &a.features.sharedSync
-	a.syncLocationSettings(c)
 	a.syncStatusCard(c)
-	ui.Text(c, "配置同步").Bold()
-	ui.Text(c, "与 macOS OShell 共用加密配置协议。各节点使用相同主密码及同一同步目标；会话、代理、快捷引用、设置和保存的密码双向同步。首次接入请选择使用共享数据或合并本地会话。").Wrap()
-	ui.Checkbox(c, &f.options.Enabled, "启用配置同步")
-	selectValue(c, "同步方式", &f.options.Backend, [][2]string{{"webdav", "WebDAV"}, {"directory", "iCloud / 同步目录"}})
-	ui.Field(c, "目录地址", func() { ui.TextInput(c, &f.options.Address).Label("同步目录地址") })
-	if f.options.Backend == "directory" {
-		ui.Button(c, "选择目录…").Disabled(f.busy).OnClick(func() {
-			paths, e := mygo.Dialog.Open(mygo.OpenDialogOptions{Parent: a.preferencesWindow, Title: "选择共享配置目录", Directory: true})
-			if e != nil {
-				f.status = e.Error()
-			} else if len(paths) > 0 {
-				f.options.Address = paths[0]
-			}
-		})
-	} else {
-		ui.Field(c, "用户名", func() { ui.TextInput(c, &f.options.Username) })
-		ui.Field(c, "密码", func() { passwordInput(c, &f.password).Placeholder("留空沿用此地址已保存的密码") })
+	ui.Text(c, "多设备同步").Bold()
+	ui.Text(c, "仅同步会话、目录、快捷链接、代理和加密密码；主题、字体、快捷键等客户端设置保留在本机。").Wrap()
+	current := "none"
+	if f.options.Enabled {
+		current = f.options.Backend
+	}
+	if f.method == "" {
+		f.method = current
+	}
+	selectValue(c, "同步方式", &f.method, [][2]string{{"none", "不启用同步"}, {"directory", "同步目录"}, {"webdav", "WebDAV"}})
+	if f.method != current {
+		a.selectSyncMethod(f.method)
+	}
+	if f.options.Enabled {
+		if f.options.Backend == "directory" {
+			ui.Field(c, "同步目录", func() { ui.TextInput(c, &f.options.Address).Label("同步目录地址") })
+			ui.Button(c, "选择同步目录…").Disabled(f.busy).OnClick(a.chooseLiveSyncDirectory)
+			ui.Text(c, "自动识别空目录或已有加密配置，点击应用立即切换；首次接入仍需确认。").Wrap()
+		} else {
+			ui.Field(c, "WebDAV 地址", func() {
+				ui.TextInput(c, &f.options.Address).Label("同步目录地址").Placeholder("HTTP / HTTPS WebDAV 父目录地址")
+			})
+			ui.Text(c, "自动使用或创建 oshell 子目录；已有直接同步文件的旧地址继续沿用。测试连接可能创建该目录。").Wrap()
+			ui.Field(c, "用户名", func() { ui.TextInput(c, &f.options.Username) })
+			ui.Field(c, "密码", func() { passwordInput(c, &f.password).Placeholder("留空沿用此地址已保存的密码") })
+			a.webDAVCertificateSettings(c)
+		}
 	}
 	ui.Row(c).Gap(8).Children(func() {
-		if f.options.Backend == "webdav" {
+		if f.options.Enabled && f.options.Backend == "webdav" {
 			ui.Button(c, "测试 WebDAV 连接").Disabled(f.probing || f.busy || a.configurationBusy()).OnClick(a.testWebDAVConnection)
 			if f.probing {
 				ui.Button(c, "取消连接测试").OnClick(a.cancelWebDAVProbe)
 			}
 		}
-		ui.PrimaryButton(c, "关闭设置后同步").Disabled(f.busy || a.configurationBusy()).OnClick(a.queueSavedSharedSync)
-		if f.busy || f.manualQueued || f.deferred {
+		ui.PrimaryButton(c, "关闭设置后同步").Disabled(a.syncOperationBusy() || a.configurationBusy()).OnClick(a.queueSavedSharedSync)
+		owner := a.syncStatusOwner()
+		active := &owner.features.sharedSync
+		if active.busy || active.manualQueued || active.deferred {
 			ui.Button(c, "取消本次").OnClick(func() {
-				f.manualQueued = false
-				f.deferred = false
-				f.status = "本次同步已取消，本地修改保留"
-				if f.cancel != nil {
-					f.cancel()
+				active.manualQueued = false
+				active.deferred = false
+				active.status = "本次同步已取消，本地修改保留"
+				active.phase = core.SyncCancelled
+				owner.invalidateSyncPresentation()
+				if active.cancel != nil {
+					active.cancel()
 				}
 			})
 		}
@@ -117,16 +142,19 @@ func (a *App) sharedSyncSettings(c *ui.Context) {
 	if f.status != "" {
 		ui.Text(c, f.status).Wrap()
 	}
+	a.syncLocationSettings(c)
 	ui.Text(c, "WebDAV 共用 oshell-vault.json；同步目录共用 configuration.json。本机数据目录保持独立，不要同步本机密钥。云盘进度请在对应客户端查看。").TextColor(c.Theme().TextMuted)
 }
 func (a *App) saveSharedSyncSettings() { a.saveSharedSyncSettingsThen(nil) }
 
 func (a *App) saveSharedSyncSettingsThen(done func()) {
 	f := &a.features.sharedSync
-	if f.busy || a.configurationBusy() {
+	if a.syncOperationBusy() || a.configurationBusy() {
 		return
 	}
 	options, password := f.options, f.password
+	expected := f.savedOptions
+	expectedVault := f.savedVaultRevision
 	options.Version = 1
 	if options.Backend != "directory" {
 		options.RequireExisting = false
@@ -145,22 +173,15 @@ func (a *App) saveSharedSyncSettingsThen(done func()) {
 	f.busy = true
 	a.setConfigurationBusy(true)
 	go func() {
-		var err error
-		if options.Enabled && options.Backend == "webdav" && password != "" {
-			p := options.CredentialProfile()
-			err = a.vault.PutFor(p, password, p.Identity())
-		}
+		err := core.SaveSyncConnection(a.vault, expected, options, password, expectedVault)
 		if err == nil {
-			err = a.saveSyncOptions(options)
-			if err == nil {
-				event := core.SyncConfigured
-				if !options.Enabled {
-					event = core.SyncDisabled
-				}
-				_ = (core.SyncDiagnostics{Directory: a.store.Dir, Target: options.Target(), Backend: options.Backend}).Record(event, true, 0, nil, "")
+			event := core.SyncConfigured
+			if !options.Enabled {
+				event = core.SyncDisabled
 			}
+			_ = (core.SyncDiagnostics{Directory: a.store.Dir, Target: options.Target(), Backend: options.Backend}).Record(event, true, 0, nil, "")
 		}
-		a.post(func() {
+		complete := func() {
 			f.busy = false
 			a.setConfigurationBusy(false)
 			if err != nil {
@@ -169,6 +190,7 @@ func (a *App) saveSharedSyncSettingsThen(done func()) {
 				return
 			}
 			f.status = "同步设置已保存"
+			a.invalidateSyncPresentation()
 			if f.password == password {
 				f.password = ""
 			}
@@ -178,10 +200,13 @@ func (a *App) saveSharedSyncSettingsThen(done func()) {
 			a.clearSharedSyncPlan()
 			f.loaded = false
 			a.loadSharedSyncSettings()
-			if done != nil {
+			if done != nil && !a.stopped.Load() {
 				done()
 			}
-		})
+		}
+		if !a.post(complete) {
+			mygo.RunOnMain(complete)
+		}
 	}()
 }
 func (a *App) clearSharedSyncPlan() {
@@ -197,7 +222,7 @@ func (a *App) clearSharedSyncPlan() {
 }
 func (a *App) startSharedSync() {
 	f := &a.features.sharedSync
-	if f.busy || a.configurationBusy() {
+	if a.syncOperationBusy() || a.configurationBusy() {
 		return
 	}
 	background := f.background
@@ -208,7 +233,7 @@ func (a *App) startSharedSync() {
 	f.deferred = false
 	options, e := a.loadSyncOptions()
 	if e != nil {
-		f.status = e.Error()
+		a.sharedSyncFailed(e)
 		return
 	}
 	if !options.Enabled {
@@ -217,7 +242,7 @@ func (a *App) startSharedSync() {
 	}
 	master, e := a.vault.MasterSecret()
 	if e != nil {
-		f.status = e.Error()
+		a.sharedSyncFailed(e)
 		return
 	}
 	password := ""
@@ -226,19 +251,25 @@ func (a *App) startSharedSync() {
 		password, e = a.vault.GetFor(p, p.Identity())
 		if e != nil {
 			clear(master)
-			f.status = e.Error()
+			a.sharedSyncFailed(e)
 			return
 		}
 	}
 	transport, e := options.Transport(password, a.store.Dir)
 	if e != nil {
 		clear(master)
-		f.status = e.Error()
+		a.sharedSyncFailed(e)
 		return
 	}
 	a.clearSharedSyncPlan()
-	f.master = master
+	// The worker owns master until Prepare returns. Closing a window may wipe
+	// the UI copy while the worker is still unwinding cancellation.
+	f.master = append([]byte(nil), master...)
+	f.savedEnabled, f.savedOptions = true, options
+	f.loaded = true
+	f.options = options
 	f.busy = true
+	a.invalidateSyncPresentation()
 	f.status = "正在读取共享配置…"
 	ctx, cancel := context.WithCancel(context.Background())
 	f.cancel = cancel
@@ -248,6 +279,7 @@ func (a *App) startSharedSync() {
 	engine.Progress = func(event core.SyncEvent, issue error) {
 		a.post(func() {
 			f.phase = event
+			a.invalidateSyncPresentation()
 			if issue != nil {
 				f.logIssue = issue.Error()
 			} else {
@@ -256,6 +288,7 @@ func (a *App) startSharedSync() {
 		})
 	}
 	go func() {
+		defer clear(master)
 		plan, err := engine.Prepare(ctx, cfg, master, !options.RequireExisting)
 		if !a.post(func() {
 			f.busy = false
@@ -266,8 +299,10 @@ func (a *App) startSharedSync() {
 			f.cancel = nil
 			f.pendingDraft = engine.ConflictStore().Exists()
 			a.loadSyncDiagnostics()
+			a.invalidateSyncPresentation()
 			if err != nil {
 				f.status = err.Error()
+				a.invalidateSyncPresentation()
 				if !background {
 					a.status = f.status
 				}
@@ -288,6 +323,13 @@ func (a *App) startSharedSync() {
 			a.commitSharedSync()
 		}) {
 			clear(master)
+			mygo.RunOnMain(func() {
+				cancel()
+				f.cancel, f.busy = nil, false
+				a.clearSharedSyncPlan()
+				f.phase = core.SyncCancelled
+				a.invalidateSyncPresentation()
+			})
 		}
 	}()
 }
@@ -336,6 +378,14 @@ func (a *App) commitSharedSync() {
 				f.status = "同步完成"
 			}
 			a.status = f.status
+			if errors.Is(err, core.ErrSyncDeferred) && !errors.Is(err, context.Canceled) {
+				f.phase = core.SyncQueued
+				f.pendingLocal = true
+				if a.hub != nil {
+					a.hub.scheduleSharedSync(2 * time.Second)
+				}
+			}
+			a.invalidateSyncPresentation()
 		}
 		if !a.post(complete) {
 			// A native/forced window close must not strand the shared busy
@@ -354,7 +404,7 @@ func (a *App) sharedSyncConflictDialog(c *ui.Context) {
 		ui.Column(c).Width(min(float32(1000), max(float32(520), width-48))).Gap(12).Children(func() {
 			ui.Text(c, "共享配置差异").FontSize(20).Bold()
 			if f.plan.InitialChoiceRequired {
-				ui.Text(c, fmt.Sprintf("共享端有 %d 个会话，本机有 %d 个。首次同步不会按时间自动覆盖。", len(f.plan.Remote.Profiles), len(f.plan.Local.Profiles))).Wrap()
+				ui.Text(c, fmt.Sprintf("共享端有 %d 个会话，本机有 %d 个。合并会保留各自的目录、代理和快捷链接；客户端设置保留在本机。", len(f.plan.Remote.Profiles), len(f.plan.Local.Profiles))).Wrap()
 				for _, option := range []struct {
 					title string
 					merge bool
@@ -404,7 +454,7 @@ func (h *applicationHub) scheduleSharedSync(delay time.Duration) {
 		owner.post(func() {
 			h.syncTimer = nil
 			_, locked := owner.vault.State()
-			if !locked && !owner.syncEditingBlocked() && !owner.configurationBusy() && !owner.features.sharedSync.busy && owner.features.sharedSync.plan == nil {
+			if !locked && !owner.syncEditingBlocked() && !owner.configurationBusy() && !owner.syncOperationBusy() && owner.syncStatusOwner().features.sharedSync.plan == nil {
 				owner.features.sharedSync.background = true
 				owner.startSharedSync()
 			}
@@ -415,7 +465,7 @@ func (h *applicationHub) scheduleSharedSync(delay time.Duration) {
 
 func (a *App) discardSharedConflictDraft() {
 	f := &a.features.sharedSync
-	if f.busy || a.configurationBusy() {
+	if a.syncOperationBusy() || a.configurationBusy() {
 		return
 	}
 	options, err := a.loadSyncOptions()
@@ -476,9 +526,10 @@ func (a *App) runSyncMenuAction(discard bool) {
 
 func (a *App) queueSavedSharedSync() {
 	f := &a.features.sharedSync
-	if f.busy || a.configurationBusy() {
+	if a.syncOperationBusy() || a.configurationBusy() {
 		return
 	}
 	f.manualQueued = true
+	a.invalidateSyncPresentation()
 	f.status = "已安排同步，关闭设置后使用已保存的配置执行"
 }

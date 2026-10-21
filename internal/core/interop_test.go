@@ -147,7 +147,15 @@ func TestSwiftMultiNodeSyncTransports(t *testing.T) {
 						w.WriteHeader(401)
 						return
 					}
-					if r.URL.Path != "/vault/oshell-vault.json" {
+					if r.Method == "GET" && r.URL.Path == "/vault/oshell-vault.json" {
+						w.WriteHeader(404)
+						return
+					}
+					if r.Method == "PROPFIND" && r.URL.Path == "/vault/oshell/" {
+						writeDAVCollection(w, r.URL.Path)
+						return
+					}
+					if r.URL.Path != "/vault/oshell/oshell-vault.json" {
 						http.NotFound(w, r)
 						return
 					}
@@ -198,6 +206,8 @@ func TestSwiftMultiNodeSyncTransports(t *testing.T) {
 				dir := t.TempDir()
 				store := &Store{Dir: dir}
 				cfg := DefaultConfig()
+				cfg.Settings.FontSize = 20
+				cfg.SessionDefaults.SSHPort = 2220
 				if err := store.Save(cfg); err != nil {
 					t.Fatal(err)
 				}
@@ -222,6 +232,9 @@ func TestSwiftMultiNodeSyncTransports(t *testing.T) {
 				if err != nil {
 					t.Fatal(err)
 				}
+				if cfg.Settings.FontSize != 20 || cfg.SessionDefaults.SSHPort != 2220 || len(cfg.QuickCommands) != 0 {
+					t.Fatal("Swift sync overwrote local client settings")
+				}
 				return engine, cfg
 			}
 			a, local := node()
@@ -245,6 +258,9 @@ func TestSwiftMultiNodeSyncTransports(t *testing.T) {
 			}
 			if local.Profiles[0].Name != "Swift 修改" || local.Profiles[1].Name != "Go 修改" {
 				t.Fatal("independent edit lost")
+			}
+			if local.Settings.FontSize != 20 || local.SessionDefaults.SSHPort != 2220 {
+				t.Fatal("session merge applied legacy remote settings")
 			}
 			// A stale node editing the same session must not overwrite Swift's change.
 			other.Profiles[0].Name = "stale node edit"

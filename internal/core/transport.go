@@ -102,6 +102,7 @@ type Connection struct {
 	reader           *io.PipeReader
 	output           *io.PipeWriter
 	writer           io.WriteCloser
+	writeMu          sync.Mutex
 	once             sync.Once
 	done             chan struct{}
 	waitMu           sync.Mutex
@@ -151,6 +152,31 @@ func expandHome(path string) string {
 	}
 	return path
 }
+
+// The SSH reader keeps running while an operator prompt waits for input.
+// Propagate a closed socket to that prompt instead of leaving an abandoned
+// authentication dialog at the head of the application queue until timeout.
+type authenticationConn struct {
+	net.Conn
+	cancel context.CancelFunc
+}
+
+func (c authenticationConn) Read(b []byte) (int, error) {
+	n, err := c.Conn.Read(b)
+	if err != nil {
+		c.cancel()
+	}
+	return n, err
+}
+
+func (c authenticationConn) Write(b []byte) (int, error) {
+	n, err := c.Conn.Write(b)
+	if err != nil {
+		c.cancel()
+	}
+	return n, err
+}
+
 func authenticate(ctx context.Context, c net.Conn, p Profile, cred Credentials, trust *TrustStore, approve func(HostPrompt) bool, verified *atomic.Bool) (*ssh.Client, error) {
 	hctx, cancel := context.WithTimeout(ctx, 2*time.Minute)
 	defer cancel()
@@ -411,7 +437,7 @@ func authenticate(ctx context.Context, c net.Conn, p Profile, cred Credentials, 
 	}
 	stop := context.AfterFunc(hctx, func() { c.Close() })
 	defer stop()
-	cc, chs, req, e := ssh.NewClientConn(c, p.Address(), cfg)
+	cc, chs, req, e := ssh.NewClientConn(authenticationConn{Conn: c, cancel: cancel}, p.Address(), cfg)
 	if e != nil {
 		return nil, e
 	}
@@ -639,10 +665,17 @@ func (c *Connection) Read(b []byte) (int, error) {
 	return n, e
 }
 func (c *Connection) Write(b []byte) (int, error) {
+	c.writeMu.Lock()
+	defer c.writeMu.Unlock()
+	return c.write(b)
+}
+func (c *Connection) write(b []byte) (int, error) {
 	if c.writer == nil {
 		return 0, fmt.Errorf("文件会话没有终端输入")
 	}
-	c.lastActivity.Store(time.Now().UnixNano())
+	if len(b) > 0 {
+		c.lastActivity.Store(time.Now().UnixNano())
+	}
 	return c.writer.Write(b)
 }
 func (c *Connection) Resize(cols, rows int) error {
@@ -701,6 +734,8 @@ func (c *Connection) LogState() (string, bool, error) {
 	return c.logPath, c.logFile != nil, c.logError
 }
 func (c *Connection) SetManagedBusy(busy bool) {
+	c.writeMu.Lock()
+	defer c.writeMu.Unlock()
 	c.managedBusy.Store(busy)
 	if !busy {
 		c.lastActivity.Store(time.Now().UnixNano())
@@ -718,6 +753,9 @@ func (c *Connection) UpdateIdleKeepAlive(k KeepAliveSettings) error {
 		return fmt.Errorf("连接已关闭")
 	default:
 	}
+	// Applying live settings is activity, just like the native client. Start
+	// the new interval now instead of inheriting the previous idle deadline.
+	c.lastActivity.Store(time.Now().UnixNano())
 	select {
 	case c.idleChanges <- k:
 	default:
@@ -757,17 +795,31 @@ func (c *Connection) idleKeepAlive(k KeepAliveSettings) {
 			return
 		case k = <-c.idleChanges:
 		case <-tick:
-			if k.IdleEnabled && !c.managedBusy.Load() && time.Since(time.Unix(0, c.lastActivity.Load())) >= period {
-				data, e := IdleBytes(k.IdleText)
-				if e != nil {
-					return
-				}
-				if _, e = c.Write(data); e != nil {
-					return
-				}
+			if e := c.sendIdleIfNeeded(k); e != nil {
+				return
 			}
 		}
 	}
+}
+func (c *Connection) sendIdleIfNeeded(k KeepAliveSettings) error {
+	// Serialize the final idle check with normal input and transfer ownership;
+	// a timer must not inject text into a newly started ZMODEM exchange.
+	c.writeMu.Lock()
+	defer c.writeMu.Unlock()
+	select {
+	case <-c.done:
+		return io.ErrClosedPipe
+	default:
+	}
+	if !k.IdleEnabled || c.managedBusy.Load() || time.Since(time.Unix(0, c.lastActivity.Load())) < time.Duration(k.IdleInterval)*time.Second {
+		return nil
+	}
+	data, err := IdleBytes(k.IdleText)
+	if err != nil {
+		return err
+	}
+	_, err = c.write(data)
+	return err
 }
 func (t *transport) keepAlive(k KeepAliveSettings) {
 	period := time.Duration(k.Interval) * time.Second

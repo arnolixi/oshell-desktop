@@ -13,17 +13,10 @@ import (
 	"time"
 
 	"github.com/egoist/mygo"
-	"github.com/egoist/mygo/ui"
 	"oshell-desktop/internal/core"
 	"oshell-desktop/internal/terminal"
 	"oshell-desktop/internal/zmodem"
 )
-
-type terminalTransferState struct {
-	active  bool
-	visible bool
-	status  string
-}
 
 func postPane(p *pane, fn func(*App)) bool {
 	if owner := p.owner.Load(); owner != nil {
@@ -45,7 +38,7 @@ func (a *App) configureTerminalTransferWithPicker(p *pane, opts *terminal.Option
 	opts.TransferHandler = func(ctx context.Context, upload bool, conn net.Conn) error {
 		window := make(chan *mygo.Window, 1)
 		if !postPane(p, func(owner *App) {
-			p.transfer = terminalTransferState{active: true, visible: true, status: "ZMODEM · 等待选择文件"}
+			p.transfer = transferNoticeState{active: true, visible: true, upload: upload, status: "ZMODEM · 等待选择文件"}
 			window <- owner.win
 		}) {
 			return context.Canceled
@@ -60,6 +53,10 @@ func (a *App) configureTerminalTransferWithPicker(p *pane, opts *terminal.Option
 		if err != nil {
 			return err
 		}
+		if len(paths) == 0 {
+			return context.Canceled
+		}
+		postPane(p, func(*App) { p.transfer.status = "ZMODEM · 正在协商传输" })
 		started, last := time.Now(), time.Time{}
 		progress := func(value zmodem.FileProgress) {
 			now := time.Now()
@@ -67,8 +64,12 @@ func (a *App) configureTerminalTransferWithPicker(p *pane, opts *terminal.Option
 				return
 			}
 			last = now
-			status := fmt.Sprintf("ZMODEM · %s · %s / %s · %s/s", value.Name, bytesLabel(value.Bytes), bytesLabel(value.Total), bytesLabel(int64(float64(value.Bytes)/max(now.Sub(started).Seconds(), 0.1))))
-			postPane(p, func(*App) { p.transfer.status = status })
+			speed := int64(float64(value.Bytes) / max(now.Sub(started).Seconds(), 0.1))
+			status := fmt.Sprintf("ZMODEM · %s · %s / %s · %s/s", value.Name, bytesLabel(value.Bytes), bytesLabel(value.Total), bytesLabel(speed))
+			postPane(p, func(*App) {
+				p.transfer.status = status
+				p.transfer.progress, p.transfer.hasProgress, p.transfer.speed = transferNoticeProgress{value.Name, value.Bytes, value.Total}, true, speed
+			})
 		}
 		if upload {
 			var files []zmodem.SendFile
@@ -114,6 +115,7 @@ func (a *App) configureTerminalTransferWithPicker(p *pane, opts *terminal.Option
 			switch {
 			case err == nil:
 				p.transfer.status = "ZMODEM · 传输完成"
+				p.transfer.dismissAt = time.Now().Add(transferNoticeDismissDelay)
 			case errors.Is(err, context.Canceled) || errors.Is(err, zmodem.ErrCancelled):
 				p.transfer.status = "ZMODEM · 已取消"
 			default:
@@ -194,17 +196,4 @@ func (f *transferFile) Close() error {
 		return e
 	}
 	return core.PublishDownloadedFile(f.file.Name(), f.target)
-}
-func (a *App) terminalTransferView(c *ui.Context, p *pane) {
-	if !p.transfer.visible {
-		return
-	}
-	ui.Row(c).Padding(5, 8).Gap(8).Background(c.Theme().Surface).Children(func() {
-		ui.Text(c, p.transfer.status).SingleLine().Grow(1).FontSize(12)
-		if p.transfer.active {
-			ui.Button(c, "取消传输").OnClick(p.term.CancelTransfer)
-		} else {
-			ui.Button(c, "关闭").OnClick(func() { p.transfer.visible = false })
-		}
-	})
 }

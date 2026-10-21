@@ -7,7 +7,13 @@ import (
 
 func (a *App) tabDragScroll(c *ui.Context, scroll ui.Element, g *tabGroup) {
 	// Register the container for drops in trailing space; individual tabs keep priority.
-	_, over := ui.DragOver[tabDrag](scroll)
+	if drag, dropped := ui.Drop[tabDrag](scroll); dropped {
+		a.post(func() { a.receiveTabDrag(drag, g, "", false) })
+	}
+	drag, over := ui.DragOver[tabDrag](scroll)
+	if over && !a.acceptsTabDrag(drag, g) {
+		over = false
+	}
 	if !over && !g.dragOver {
 		g.scrollTime = time.Time{}
 		return
@@ -28,12 +34,5 @@ func (a *App) tabDragScroll(c *ui.Context, scroll ui.Element, g *tabGroup) {
 	} else if x > scroll.Bounds().W-28 {
 		g.scroll.X = min(g.scroll.MaxX, g.scroll.X+delta)
 		c.AnimationFrame()
-	}
-	if drag, dropped := ui.Drop[tabDrag](scroll); dropped {
-		tabs := a.groupTabs(g)
-		if len(tabs) > 0 {
-			target := tabs[len(tabs)-1].id
-			a.post(func() { a.moveTabRelative(drag.ID, target, true) })
-		}
 	}
 }

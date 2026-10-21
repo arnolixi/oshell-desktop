@@ -41,7 +41,10 @@ type Credentials struct {
 	Password, KeyPassphrase, ProxyPassword, ProxyKeyPassphrase string
 	SavePassword                                               bool
 }
-type HostPrompt struct{ Address, Algorithm, Fingerprint string }
+type HostPrompt struct {
+	Address, Algorithm, Fingerprint string
+	Context                         context.Context
+}
 type TrustStore struct {
 	Path string
 	mu   sync.Mutex
@@ -49,37 +52,35 @@ type TrustStore struct {
 
 func (t *TrustStore) Callback(ctx context.Context, approve func(HostPrompt) bool) ssh.HostKeyCallback {
 	return func(host string, remote net.Addr, key ssh.PublicKey) error {
+		// Do not hold the known_hosts mutex while waiting for an operator: that
+		// would also stall unrelated connections with already trusted host keys.
 		t.mu.Lock()
-		defer t.mu.Unlock()
-		f, err := os.OpenFile(t.Path, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0600)
-		if err != nil {
+		known, err := t.checkHostLocked(host, remote, key)
+		t.mu.Unlock()
+		if err != nil || known {
 			return err
-		}
-		if err = f.Close(); err != nil {
-			return err
-		}
-		cb, err := knownhosts.New(t.Path)
-		if err != nil {
-			return err
-		}
-		err = cb(host, remote, key)
-		if err == nil {
-			return nil
-		}
-		var ke *knownhosts.KeyError
-		if !errors.As(err, &ke) || len(ke.Want) > 0 {
-			return fmt.Errorf("主机密钥不匹配，连接已阻止。请核实服务器身份后检查 %s: %w", t.Path, err)
 		}
 		if ctx.Err() != nil {
 			return ctx.Err()
 		}
-		if approve == nil || !approve(HostPrompt{host, key.Type(), ssh.FingerprintSHA256(key)}) {
+		if approve == nil || !approve(HostPrompt{Address: host, Algorithm: key.Type(), Fingerprint: ssh.FingerprintSHA256(key), Context: ctx}) {
 			return fmt.Errorf("未信任服务器指纹")
 		}
 		if ctx.Err() != nil {
 			return ctx.Err()
 		}
-		f, err = os.OpenFile(t.Path, os.O_APPEND|os.O_WRONLY, 0600)
+		t.mu.Lock()
+		defer t.mu.Unlock()
+		// Another connection may have added this host while approval was open.
+		// Recheck it, including mismatches, before publishing the approved key.
+		known, err = t.checkHostLocked(host, remote, key)
+		if err != nil || known {
+			return err
+		}
+		if ctx.Err() != nil {
+			return ctx.Err()
+		}
+		f, err := os.OpenFile(t.Path, os.O_APPEND|os.O_WRONLY, 0600)
 		if err != nil {
 			return err
 		}
@@ -90,6 +91,29 @@ func (t *TrustStore) Callback(ctx context.Context, approve func(HostPrompt) bool
 		}
 		return closeErr
 	}
+}
+
+func (t *TrustStore) checkHostLocked(host string, remote net.Addr, key ssh.PublicKey) (bool, error) {
+	f, err := os.OpenFile(t.Path, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0600)
+	if err != nil {
+		return false, err
+	}
+	if err = f.Close(); err != nil {
+		return false, err
+	}
+	cb, err := knownhosts.New(t.Path)
+	if err != nil {
+		return false, err
+	}
+	err = cb(host, remote, key)
+	if err == nil {
+		return true, nil
+	}
+	var ke *knownhosts.KeyError
+	if !errors.As(err, &ke) || len(ke.Want) > 0 {
+		return false, fmt.Errorf("主机密钥不匹配，连接已阻止。请核实服务器身份后检查 %s: %w", t.Path, err)
+	}
+	return false, nil
 }
 
 func authenticationTitle(challenge func(context.Context, AuthenticationPrompt) ([]string, error), title string) func(context.Context, AuthenticationPrompt) ([]string, error) {

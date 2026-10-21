@@ -585,7 +585,7 @@ func (a *App) groupWorkspace(c *ui.Context, n *groupNode) {
 		a.groupTabBar(c, g)
 		box := ui.Column(c).Grow(1).MinHeight(0).FillWidth().Clip()
 		position := "center"
-		if _, over := ui.DragOver[tabDrag](box); over {
+		if drag, over := ui.DragOver[tabDrag](box); over && a.tabByID(drag.ID) != nil {
 			x, y, _ := box.PointerPosition()
 			r := box.Bounds()
 			position = dropPosition(x, y, r.W, r.H)

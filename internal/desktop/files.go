@@ -19,6 +19,8 @@ import (
 )
 
 type fileTransfer struct {
+	pane         *pane
+	notice       *fileTransferNotice // Accessed only on the UI thread.
 	pause        atomic.Bool
 	lastProgress time.Time
 	lastBytes    int64
@@ -29,6 +31,7 @@ type fileTransfer struct {
 type fileTransferContextKey struct{}
 
 type fileState struct {
+	notice                       *fileTransferNotice
 	records                      *transferLog
 	recordsOpen                  bool
 	recordDetail                 string
@@ -509,7 +512,7 @@ func (a *App) fileBrowser(c *ui.Context, p *pane, full bool) {
 					}
 				})
 			}
-			if f.cancel != nil {
+			if f.cancel != nil && (f.notice == nil || !f.notice.active) {
 				if f.records != nil && f.activeTransfer != nil {
 					for _, r := range f.records.snapshot() {
 						if r.Status == "传输中" && r.Resume {
@@ -524,6 +527,9 @@ func (a *App) fileBrowser(c *ui.Context, p *pane, full bool) {
 		ui.Text(c, "拖入文件或文件夹上传；拖到目录时上传至该目录。重名传输默认自动编号。").FontSize(11).TextColor(c.Theme().TextMuted)
 		a.transferRecordsView(c, p)
 		status := f.status
+		if f.notice != nil && f.notice.active {
+			status = "正在传输，进度见右上角"
+		}
 		if f.filter != "" {
 			status = fmt.Sprintf("显示 %d / %d 项 · %s", len(visible), len(f.entries), status)
 		}
@@ -623,7 +629,7 @@ func (a *App) withFileOperation(p *pane, refresh bool, operation func(context.Co
 	f.status = "正在处理文件…"
 	f.started = time.Now()
 	ctx, cancel := context.WithCancel(context.Background())
-	task := &fileTransfer{files: f, started: f.started, refresh: refresh, lastProgress: f.started}
+	task := &fileTransfer{pane: p, files: f, started: f.started, refresh: refresh, lastProgress: f.started}
 	f.activeTransfer = task
 	ctx = context.WithValue(ctx, fileTransferContextKey{}, task)
 	ctx = core.WithTransferLimiter(ctx, &f.limiter)
@@ -651,6 +657,21 @@ func (a *App) transferDone(p *pane, task *fileTransfer, err error) {
 			refreshDirectory = f.transferDirectory
 		}
 		f.transferDirectory = ""
+		if task.notice != nil {
+			task.notice.active = false
+			if err == nil {
+				task.notice.status = "传输完成"
+				task.notice.dismissAt = time.Now().Add(transferNoticeDismissDelay)
+			} else {
+				task.notice.status = "传输失败：" + err.Error()
+				if errors.Is(err, context.Canceled) {
+					task.notice.status = "传输已取消"
+					if task.pause.Load() {
+						task.notice.status = "传输已暂停"
+					}
+				}
+			}
+		}
 		if err != nil {
 			if errors.Is(err, context.Canceled) {
 				f.status = "传输已取消"
@@ -689,7 +710,12 @@ func (a *App) transferProgress(p *pane, ctx context.Context) func(core.TransferP
 				delta = progress.Bytes
 			}
 			elapsed := now.Sub(task.lastProgress).Seconds()
-			task.files.status = fmt.Sprintf("%s · %s · %s/s · %d 个文件", progress.Path, bytesLabel(progress.Bytes), bytesLabel(int64(float64(delta)/max(elapsed, 0.1))), progress.Files)
+			speed := int64(float64(delta) / max(elapsed, 0.1))
+			task.files.status = fmt.Sprintf("%s · %s · %s/s · %d 个文件", progress.Path, bytesLabel(progress.Bytes), bytesLabel(speed), progress.Files)
+			if task.notice != nil {
+				task.notice.progress.Bytes = progress.Bytes
+				task.notice.speed = speed
+			}
 			task.lastBytes = progress.Bytes
 			task.lastProgress = now
 		})

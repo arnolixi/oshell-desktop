@@ -226,6 +226,12 @@ func (a *App) settingsView(c *ui.Context) {
 		a.settingsPreviewApplied = true
 		a.settingsPreviewDark = dark
 	}
+	if a.passwordLocked() && a.features.settingsTab == 3 {
+		a.loadSharedSyncSettings()
+		ui.Column(c).Fill().Padding(16).Children(func() { a.syncStatusCard(c) })
+		a.featureDialogs(c)
+		return
+	}
 	if a.lockedWorkspace(c) {
 		return
 	}

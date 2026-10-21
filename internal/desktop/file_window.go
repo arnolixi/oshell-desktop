@@ -170,6 +170,7 @@ func (a *App) fileWindowView(c *ui.Context) {
 			ui.Text(c, a.status).FontSize(11).TextColor(c.Theme().TextMuted).Padding(8)
 		}
 	})
+	a.transferOverlays(c)
 	a.dialogs(c)
 }
 

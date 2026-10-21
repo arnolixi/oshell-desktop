@@ -156,6 +156,7 @@ type surface struct {
 	dragRequest  *platform.DragRequest
 	dragError    error
 	dragCanceled bool
+	dragNoTarget bool
 	dataDrop     *gtkDataDrop
 }
 

@@ -25,10 +25,15 @@ type fragmentedZmodemConn struct {
 	net.Conn
 	mu            sync.Mutex
 	read, written []byte
+	readLimit     int
 }
 
 func (c *fragmentedZmodemConn) Read(b []byte) (int, error) {
-	n, err := c.Conn.Read(b[:min(len(b), 7)])
+	limit := c.readLimit
+	if limit == 0 {
+		limit = 7
+	}
+	n, err := c.Conn.Read(b[:min(len(b), limit)])
 	c.mu.Lock()
 	c.read = append(c.read, b[:n]...)
 	if len(c.read) > 512 {
@@ -281,14 +286,24 @@ func TestTerminalCancelDownloadRemovesPartialFile(t *testing.T) {
 
 func TestTerminalRealRzThenSzSameSession(t *testing.T) {
 	for _, immediate := range []bool{false, true} {
-		t.Run(fmt.Sprintf("immediate=%v", immediate), func(t *testing.T) { testTerminalRealRzThenSzSameSession(t, immediate) })
+		t.Run(fmt.Sprintf("immediate=%v", immediate), func(t *testing.T) { testTerminalRealRzThenSzSameSession(t, immediate, false) })
 	}
 }
 
-func testTerminalRealRzThenSzSameSession(t *testing.T, immediate bool) {
+func TestTerminalRealRzThenSzLargeFileMissingOO(t *testing.T) {
+	testTerminalRealRzThenSzSameSession(t, false, true)
+}
+
+func testTerminalRealRzThenSzSameSession(t *testing.T, immediate, largeMissingOO bool) {
 	localDir, remoteDir := t.TempDir(), t.TempDir()
 	name := "roundtrip.bin"
 	payload := bytes.Repeat([]byte{0, 0x18, 0x11, 0xff, 'a'}, 14000)
+	if largeMissingOO {
+		payload = make([]byte, 12993548) // Same scale as the reported 12.4 MiB file.
+		for i := range payload {
+			payload[i] = byte(i*37 + (i >> 3))
+		}
+	}
 	path := filepath.Join(localDir, name)
 	if err := os.WriteFile(path, payload, 0600); err != nil {
 		t.Fatal(err)
@@ -311,10 +326,15 @@ done`
 	p := &pane{}
 	p.owner.Store(a)
 	fragmented := &fragmentedZmodemConn{Conn: conn}
+	loss := &finishLossConn{Conn: conn}
+	if largeMissingOO {
+		fragmented.Conn, fragmented.readLimit = loss, 4093
+	}
 	opts := terminal.Options{Conn: fragmented, NoBlink: true}
 	var downloadIndex atomic.Int32
 	directions := make(chan bool, 10)
 	a.configureTerminalTransferWithPicker(p, &opts, true, func(ctx context.Context, _ *mygo.Window, upload bool) ([]string, error) {
+		loss.download.Store(!upload)
 		directions <- upload
 		if upload {
 			return []string{path}, nil
@@ -349,7 +369,9 @@ done`
 	for round := 0; round < 3; round++ {
 		for _, upload := range []bool{true, false} {
 			completed := false
-			waitOperator(t, a, func() bool {
+			deadline := time.Now().Add(20 * time.Second)
+			for !completed && time.Now().Before(deadline) {
+				a.drain()
 				select {
 				case err := <-done:
 					if err != nil {
@@ -357,9 +379,12 @@ done`
 					}
 					completed = true
 				default:
+					time.Sleep(time.Millisecond)
 				}
-				return completed
-			})
+			}
+			if !completed {
+				t.Fatal("transfer did not finish")
+			}
 			a.drain()
 			select {
 			case got := <-directions:
@@ -371,6 +396,9 @@ done`
 			}
 			if !(immediate && upload) && (p.transfer.active || p.transfer.status != "ZMODEM · 传输完成") {
 				t.Fatal(p.transfer)
+			}
+			if !upload && (p.transfer.dismissAt.IsZero() || p.transfer.remaining(time.Now()) <= 0) {
+				t.Fatal("completed download did not start its dismissal countdown")
 			}
 			prefix := "download"
 			dir := downloads[round]
@@ -392,4 +420,54 @@ done`
 		}
 	}
 	wait()
+	if largeMissingOO && loss.dropped.Load() != 3 {
+		t.Fatalf("missing-OO fault was not exercised: %d", loss.dropped.Load())
+	}
+}
+
+// Drop only the sender's final OO, after our download-side ZFIN reply.
+// Keep the shell and its prompt alive to exercise the real stuck-at-100%
+// failure, not the easier case of a connection closing after sz exits.
+type finishLossConn struct {
+	net.Conn
+	download, awaiting atomic.Bool
+	dropped            atomic.Int32
+	firstO             bool
+}
+
+func (c *finishLossConn) Write(p []byte) (int, error) {
+	if c.download.Load() && bytes.Equal(p, zmodem.BuildZhexHeader(zmodem.FrameZFIN, 0)) {
+		c.awaiting.Store(true)
+	}
+	return c.Conn.Write(p)
+}
+
+func (c *finishLossConn) Read(p []byte) (int, error) {
+	buffer := make([]byte, max(1, len(p)/2))
+	for {
+		n, err := c.Conn.Read(buffer)
+		out := 0
+		for _, b := range buffer[:n] {
+			if c.awaiting.Load() {
+				if b == 'O' {
+					if c.firstO {
+						c.firstO = false
+						c.awaiting.Store(false)
+						c.dropped.Add(1)
+					} else {
+						c.firstO = true
+					}
+					continue
+				}
+				if c.firstO {
+					p[out], out = 'O', out+1
+					c.firstO = false
+				}
+			}
+			p[out], out = b, out+1
+		}
+		if out > 0 || err != nil {
+			return out, err
+		}
+	}
 }

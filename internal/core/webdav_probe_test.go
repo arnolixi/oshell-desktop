@@ -8,7 +8,7 @@ import (
 	"testing"
 )
 
-func TestWebDAVProbeReadOnlyAndFailures(t *testing.T) {
+func TestWebDAVProbeExistingCollectionAndFailures(t *testing.T) {
 	for _, scenario := range []string{"empty", "authentication", "redirect", "weak-etag"} {
 		t.Run(scenario, func(t *testing.T) {
 			requests := 0
@@ -31,13 +31,13 @@ func TestWebDAVProbeReadOnlyAndFailures(t *testing.T) {
 					return
 				}
 				if r.Method == "PROPFIND" {
-					if r.URL.Path != "/dav/" || r.Header.Get("Depth") != "0" {
+					if r.URL.Path != "/dav/oshell/" || r.Header.Get("Depth") != "0" {
 						t.Error("wrong directory probe")
 					}
-					w.WriteHeader(207)
+					writeDAVCollection(w, r.URL.Path)
 					return
 				}
-				if r.URL.Path != "/dav/oshell-vault.json" {
+				if r.URL.Path != "/dav/oshell-vault.json" && r.URL.Path != "/dav/oshell/oshell-vault.json" {
 					t.Error("wrong file")
 				}
 				if scenario == "weak-etag" {
@@ -55,7 +55,7 @@ func TestWebDAVProbeReadOnlyAndFailures(t *testing.T) {
 			transport.client.Transport = server.Client().Transport
 			err = transport.Probe(context.Background())
 			if scenario == "empty" {
-				if err != nil || requests != 2 {
+				if err != nil || requests != 3 {
 					t.Fatal(err, requests)
 				}
 				return

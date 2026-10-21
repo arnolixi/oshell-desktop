@@ -75,11 +75,14 @@ func shortcutEvent(ev ui.InputEvent) (core.KeyboardShortcut, bool) {
 	return s, s.Valid()
 }
 func (a *App) modalActive() bool {
+	return len(a.challenges) > 0 || a.nonAuthenticationModalActive()
+}
+func (a *App) nonAuthenticationModalActive() bool {
 	if a.sidebar.rename != nil {
 		return true
 	}
 	f := &a.features
-	return f.sessionClose != nil || f.localConflict.active || f.nativeMigration.open || f.scpDraft != nil || f.uploadDraft != nil || f.sharedSync.conflictOpen || f.sharedSync.logsOpen || f.linkEditor.open || f.switcher.open || f.proxyManager.open || f.archive.open || len(a.challenges) > 0 || a.editing || a.authOpen || a.confirmSend || f.vaultOpen || f.commandsOpen || f.directoryOpen || f.fileOpen || f.pasteOpen || f.syncOpen || f.highlightOpen || f.defaultsOpen || f.liveOpen || f.operators.targetsOpen || f.operators.groupsOpen || a.groups.dialog || a.groups.numberOpen
+	return f.sessionClose != nil || f.localConflict.active || f.nativeMigration.open || f.scpDraft != nil || f.uploadDraft != nil || f.sharedSync.conflictOpen || f.sharedSync.logsOpen || f.linkEditor.open || f.switcher.open || f.proxyManager.open || f.archive.open || a.editing || a.authOpen || a.confirmSend || f.vaultOpen || f.commandsOpen || f.directoryOpen || f.fileOpen || f.pasteOpen || f.syncOpen || f.highlightOpen || f.defaultsOpen || f.liveOpen || f.operators.targetsOpen || f.operators.groupsOpen || a.groups.dialog || a.groups.numberOpen
 }
 func (a *App) shortcuts(c *ui.Context) {
 	if a.settingsOpen || a.modalActive() {

@@ -3,6 +3,7 @@ package core
 
 import (
 	"context"
+	"crypto/subtle"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -10,6 +11,8 @@ import (
 	"path/filepath"
 	"time"
 )
+
+var ErrSyncDeferred = errors.New("共享端已接收本次修改，本机有新变化，等待下一轮同步合并")
 
 type SharedSyncEngine struct {
 	Manual    bool
@@ -31,6 +34,7 @@ type SharedSyncPlan struct {
 	revision, vaultRevision, etag    string
 	digests                          map[string]string
 	baseline                         *SharedDocument
+	compatibility                    *SharedDocument
 	merge                            *SharedMerge
 	engine                           *SharedSyncEngine
 }
@@ -96,6 +100,13 @@ func (e *SharedSyncEngine) Prepare(ctx context.Context, cfg Config, master []byt
 		local = draft.Local
 		baseline = draft.Base
 	}
+	// Validate full documents before projecting them. Unknown or invalid legacy
+	// settings must still fail closed rather than being silently discarded.
+	local = sessionSyncDocument(local)
+	if baseline != nil {
+		projected := sessionSyncDocument(*baseline)
+		baseline = &projected
+	}
 	object, err := e.Transport.Fetch(ctx)
 	if err != nil {
 		return nil, err
@@ -118,10 +129,13 @@ func (e *SharedSyncEngine) Prepare(ctx context.Context, cfg Config, master []byt
 	// Both verifiers were authenticated with the same shared password. Random
 	// envelope nonces do not mean that password protection itself changed.
 	remote.Verifier = local.Verifier
-	plan.Remote = remote
+	compatibility := remote
+	plan.compatibility = &compatibility
+	plan.Remote = sessionSyncDocument(remote)
 	var header struct{ Version int }
 	json.Unmarshal(object.Data, &header)
 	plan.protocolUpgrade = remote.needsProtocolUpgrade() || header.Version != 2
+	remote = plan.Remote
 	plan.HasRemote = true
 	plan.etag = object.ETag
 	if sameShared(local, remote) {
@@ -151,8 +165,8 @@ func (e *SharedSyncEngine) Prepare(ctx context.Context, cfg Config, master []byt
 	return plan, nil
 }
 
-// ChooseInitial matches the original first-sync options: use shared data, or
-// merge local sessions into shared settings. It does not publish anything.
+// ChooseInitial selects shared sessions or merges both session collections and
+// their dependencies. Client settings remain local in either case.
 func (p *SharedSyncPlan) ChooseInitial(mergeLocal bool) error {
 	if !p.InitialChoiceRequired {
 		return fmt.Errorf("无需首次同步选择")
@@ -162,10 +176,7 @@ func (p *SharedSyncPlan) ChooseInitial(mergeLocal bool) error {
 		p.Local = p.Remote
 		return nil
 	}
-	base, local := p.Remote, p.Remote
-	base.Profiles = []PortableProfile{}
-	local.Profiles = p.Local.Profiles
-	merge, err := NewSharedMerge(base, local, p.Remote)
+	merge, err := newInitialSessionMerge(p.Local, p.Remote)
 	if err != nil {
 		return err
 	}
@@ -183,10 +194,16 @@ func (p *SharedSyncPlan) Commit(ctx context.Context, choices map[string]SharedMe
 	defer func() {
 		if resultErr != nil {
 			event := SyncFailed
+			issue := resultErr
+			if errors.Is(resultErr, ErrSyncDeferred) {
+				event = SyncQueued
+				issue = nil
+			}
 			if errors.Is(resultErr, context.Canceled) {
 				event = SyncCancelled
+				issue = resultErr
 			}
-			e.recordDiagnostic(event, started, resultErr, runID)
+			e.recordDiagnostic(event, started, issue, runID)
 		}
 	}()
 	if p.InitialChoiceRequired {
@@ -225,7 +242,9 @@ func (p *SharedSyncPlan) Commit(ctx context.Context, choices map[string]SharedMe
 	if err != nil {
 		return p.configuration, err
 	}
-	encrypted, err := document.Encode(master)
+	next = applySessionSync(next, p.configuration)
+	wire := sessionSyncWire(document, p.compatibility)
+	encrypted, err := wire.Encode(master)
 	if err != nil {
 		return p.configuration, err
 	}
@@ -242,7 +261,8 @@ func (p *SharedSyncPlan) Commit(ctx context.Context, choices map[string]SharedMe
 			return p.configuration, err
 		}
 	}
-	if !p.HasRemote || p.protocolUpgrade || !sameShared(document, p.Remote) {
+	uploaded := !p.HasRemote || p.protocolUpgrade || !sameShared(document, p.Remote)
+	if uploaded {
 		e.recordDiagnostic(SyncUploading, started, nil, runID)
 		if err = e.Transport.Put(ctx, encrypted, p.etag); err != nil {
 			return p.configuration, err
@@ -260,6 +280,12 @@ func (p *SharedSyncPlan) Commit(ctx context.Context, choices map[string]SharedMe
 	}
 	e.recordDiagnostic(SyncApplying, started, nil, runID)
 	if err = e.Store.commitCredentials(ctx, next, e.Vault, updates, p.revision, p.vaultRevision); err != nil {
+		if uploaded && (errors.Is(err, ErrConfigurationChanged) || errors.Is(err, ErrVaultChanged) || errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded)) {
+			if checkpointErr := p.saveUploadContinuation(master); checkpointErr != nil {
+				return p.configuration, errors.Join(err, fmt.Errorf("上传已完成，但无法保存后续同步基准：%w", checkpointErr))
+			}
+			return p.configuration, errors.Join(ErrSyncDeferred, err)
+		}
 		return p.configuration, err
 	}
 	// The cached export uses local ciphertext digests after the transaction.
@@ -276,6 +302,38 @@ func (p *SharedSyncPlan) Commit(ctx context.Context, choices map[string]SharedMe
 	}
 	e.recordDiagnostic(SyncCompleted, started, nil, runID)
 	return next, nil
+}
+
+// A successful PUT published the captured local changes, even if a later local
+// edit prevents applying the merge. Use the pre-merge LOCAL snapshot as the next
+// baseline: using the merged document would treat unapplied remote additions as
+// local deletions. Never advance this baseline on failed PUTs or download-only
+// attempts, and never save it with a stale or locked master password.
+func (p *SharedSyncPlan) saveUploadContinuation(master []byte) error {
+	e := p.engine
+	e.Vault.mu.Lock()
+	defer e.Vault.mu.Unlock()
+	if e.Vault.blocked {
+		return ErrPendingTransaction
+	}
+	if len(e.Vault.master) == 0 || subtle.ConstantTimeCompare(e.Vault.master, master) != 1 {
+		return ErrVaultLocked
+	}
+	release, err := lockStateDirectory(context.Background(), e.Store.Dir, false)
+	if err != nil {
+		return err
+	}
+	defer release()
+	if err = e.Vault.checkDiskRevisionLocked(); err != nil {
+		return err
+	}
+	replica := SharedReplica{Version: 1, Target: e.Replica.Target, Baseline: &p.originalLocal, CachedLocal: &p.originalLocal, CredentialDigests: p.digests}
+	if err = e.Replica.Save(replica, master); err != nil {
+		return err
+	}
+	// The choices in this draft have already been published remotely. Keeping
+	// its old local revision would block the next merge with a stale-draft error.
+	return e.ConflictStore().Clear()
 }
 func (p *SharedSyncPlan) configurationBackup(master []byte) ([]byte, error) {
 	// ChooseInitial may replace Local with Remote; export the captured original

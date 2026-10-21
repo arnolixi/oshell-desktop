@@ -25,6 +25,7 @@ type valueDrag struct {
 	elem     *node
 	canceled bool
 	native   bool
+	outside  func()
 }
 
 // Drag makes the element the source of value, dragged within the window
@@ -49,6 +50,13 @@ func (e *node) Drag(value any) *node {
 			d.value = value
 		}
 	}
+	return e
+}
+
+// OnDragOutside runs when a value drag is released outside the window's
+// client area. Escape, focus loss and in-window drops never invoke it.
+func (e *node) OnDragOutside(done func()) *node {
+	e.st.dragOutside = done
 	return e
 }
 
@@ -135,7 +143,7 @@ func (rt *engine) dragMove(x, y float32) {
 		if value == nil && s.dataSource == nil {
 			return
 		}
-		d = &valueDrag{src: s.id, value: value, offX: s.pressX, offY: s.pressY}
+		d = &valueDrag{src: s.id, value: value, offX: s.pressX, offY: s.pressY, outside: s.dragOutside}
 		rt.drag = d
 		if src := s.dataSource; src != nil {
 			d.native = true
@@ -189,6 +197,8 @@ func (rt *engine) dragEnd() bool {
 		if t := rt.states[rt.valueTarget(rt.pointerX, rt.pointerY, d.value)]; t != nil {
 			t.droppedValue, t.hasDropped = d.value, true
 			t.dropX, t.dropY = rt.pointerX, rt.pointerY
+		} else if d.outside != nil && (rt.pointerX < 0 || rt.pointerY < 0 || rt.pointerX >= rt.laidW || rt.pointerY >= rt.laidH) {
+			d.outside()
 		}
 	}
 	rt.requestFrame()

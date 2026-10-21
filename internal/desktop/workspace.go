@@ -95,6 +95,7 @@ func (a *App) view(c *ui.Context) {
 	// Register shortcuts after terminal handles and initial focus are bound.
 	// Otherwise the first Control key can be claimed by the previous frame.
 	a.shortcuts(c)
+	a.transferOverlays(c)
 	a.dialogs(c)
 }
 func (a *App) legacyToolbar(c *ui.Context) {
@@ -508,7 +509,7 @@ func (a *App) groupTabBar(c *ui.Context, g *tabGroup) {
 							p.Fill(ui.Rect{X: r.X, Y: r.Y + r.H - 2, W: r.W, H: 2}, terminalFlame, 0)
 						})
 					}
-					if _, over := ui.DragOver[tabDrag](row); over {
+					if drag, over := ui.DragOver[tabDrag](row); over && a.acceptsTabDrag(drag, g) {
 						g.dragOver = true
 						x, _, _ := row.PointerPosition()
 						if x < row.Bounds().W/2 {
@@ -518,10 +519,10 @@ func (a *App) groupTabBar(c *ui.Context, g *tabGroup) {
 						}
 					}
 					if drag, dropped := ui.Drop[tabDrag](row); dropped {
-						source, target := drag.ID, t.id
+						target := t.id
 						x, _, _ := row.PointerPosition()
 						after := x >= row.Bounds().W/2
-						a.post(func() { a.moveTabRelative(source, target, after) })
+						a.post(func() { a.receiveTabDrag(drag, g, target, after) })
 					}
 					row.ContextMenu(func(m *ui.Menu) { a.tabStripMenu(m, g, t) })
 					row.Children(func() {
@@ -532,7 +533,8 @@ func (a *App) groupTabBar(c *ui.Context, g *tabGroup) {
 						}
 						ui.Text(c, "●").FontSize(8).TextColor(dot).Tooltip(status)
 
-						title := tabTitleButton(c, t.name, fmt.Sprintf("%d  %s", i+1, t.name), t.id == g.active, t.unread).ContextMenu(func(m *ui.Menu) { a.tabStripMenu(m, g, t) }).Tooltip(a.tabConnectionDetails(t) + "\n连接状态：" + status + "\n\n双击已连接的会话可新建相同会话标签").Drag(tabDrag{t.id}).Grow(1).MinWidth(0)
+						title := tabTitleButton(c, t.name, fmt.Sprintf("%d  %s", i+1, t.name), t.id == g.active, t.unread).ContextMenu(func(m *ui.Menu) { a.tabStripMenu(m, g, t) }).Tooltip(a.tabConnectionDetails(t) + "\n连接状态：" + status + "\n\n双击可新建相同会话；拖到其他窗口标签栏可合并，拖到窗口外空白处可新建窗口；Esc 取消。").Grow(1).MinWidth(0)
+						a.terminalTabDrag(title, t)
 						a.tabTitleEvents(title, t)
 						tabBarButton(c, "关闭 "+t.name, closeIcon).ContextMenu(func(m *ui.Menu) { a.tabStripMenu(m, g, t) }).Width(22).OnClick(func() { a.requestSessionClose(t, nil) })
 					})
@@ -541,7 +543,8 @@ func (a *App) groupTabBar(c *ui.Context, g *tabGroup) {
 		})
 		a.tabDragScroll(c, scroll, g)
 		tabBarButton(c, "新建标签", plusIcon).ContextMenu(backgroundMenu).Menu(func(m *ui.Menu) { a.activateGroup(g); a.newTabMenu(m) })
-		ui.Box(c).Grow(1).MinWidth(0).ContextMenu(backgroundMenu)
+		space := ui.Box(c).Grow(1).MinWidth(24).Height(30).Label("标签栏空白区域").ContextMenu(backgroundMenu)
+		a.tabStripDropSpace(space, g)
 		tabBarButton(c, "所有标签", chevronIcon).ContextMenu(backgroundMenu).Disabled(len(tabs) == 0).Menu(func(m *ui.Menu) {
 			for _, t := range tabs {
 				title := t.name
@@ -597,7 +600,6 @@ func (a *App) nodeView(c *ui.Context, t *tab, n *node) {
 			})
 		}
 		if p.term != nil {
-			a.terminalTransferView(c, p)
 			if strings.HasPrefix(p.status, "已断开") {
 				ui.Row(c).Height(27).Padding(3, 10).Gap(8).Background(c.Theme().Surface).Children(func() {
 					ui.Text(c, p.status).SingleLine().Grow(1).TextColor(c.Theme().TextMuted)

@@ -39,7 +39,7 @@ func TestSharedSyncSettingsAndDirectoryFlow(t *testing.T) {
 	a.prepareSettings()
 	a.features.settingsTab = 3
 	tt := ui.NewTester(a.settingsView, 800, 650)
-	if !tt.HasText("配置同步") {
+	if !tt.HasText("多设备同步") || !tt.HasText("同步方式") {
 		t.Fatal(tt.Texts())
 	}
 	remote := t.TempDir()
@@ -57,7 +57,7 @@ func TestSharedSyncSettingsAndDirectoryFlow(t *testing.T) {
 	a.prepareSettings()
 	a.loadSharedSyncSettings()
 	tt.Frame()
-	if !tt.HasText("已与共享数据对齐") || tt.HasText("上次成功：暂无") {
+	if !tt.HasText("已与本机同步目录对齐") || tt.HasText("上次成功：暂无") {
 		t.Fatal("success status card missing", tt.Texts())
 	}
 	if a.features.sharedSync.summary.LastSuccess == nil {

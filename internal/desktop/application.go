@@ -14,22 +14,25 @@ import (
 )
 
 type applicationHub struct {
-	nativeKeys            nativeShortcutMonitor
-	updates               updateController
-	fileWindow            *App
-	externalServer        io.Closer
-	externalPending       []*pendingExternalLaunch
-	syncTimer             *time.Timer
-	clock                 workspaceClock
-	configBusy            bool
-	managerClipboard      *sessionConfigurationClipboard
-	settingsOwner         *App
-	store                 *core.Store
-	config                core.Config
-	vault                 *core.Vault
-	trust                 *core.TrustStore
-	windows               []*App
-	quitting, quitPending bool
+	authenticationSequence uint64
+	authenticationReady    *authenticationChallenge
+	nativeKeys             nativeShortcutMonitor
+	updates                updateController
+	fileWindow             *App
+	externalServer         io.Closer
+	externalPending        []*pendingExternalLaunch
+	syncTimer              *time.Timer
+	syncOwner              *App
+	clock                  workspaceClock
+	configBusy             bool
+	managerClipboard       *sessionConfigurationClipboard
+	settingsOwner          *App
+	store                  *core.Store
+	config                 core.Config
+	vault                  *core.Vault
+	trust                  *core.TrustStore
+	windows                []*App
+	quitting, quitPending  bool
 }
 
 func runDesktop() error {
@@ -158,13 +161,19 @@ func (h *applicationHub) save(source *App) bool {
 	return true
 }
 func (h *applicationHub) newWindow() *App {
+	return h.newWindowAt(nil)
+}
+func (h *applicationHub) newWindowAt(position *tabWindowPosition) *App {
 	a := newApp(h.store, h.config.Clone())
 	a.vault = h.vault
 	a.trust = h.trust
-	h.attach(a)
+	h.attachAt(a, position)
 	return a
 }
 func (h *applicationHub) attach(a *App) {
+	h.attachAt(a, nil)
+}
+func (h *applicationHub) attachAt(a *App, position *tabWindowPosition) {
 	a.hub = h
 	if a.passwordLocked() {
 		a.features.startupUnlock = true
@@ -172,7 +181,14 @@ func (h *applicationHub) attach(a *App) {
 		a.features.vaultAction = "unlock"
 	}
 	h.windows = append(h.windows, a)
-	a.win = mygo.NewWindow(mygo.WindowOptions{Title: "OShell Desktop", Width: 1280, Height: 820, MinWidth: 880, MinHeight: 560, Content: ui.View(a.view)})
+	a.win = mygo.NewWindow(mygo.WindowOptions{Title: "OShell Desktop", Width: 1280, Height: 820, MinWidth: 880, MinHeight: 560, Hidden: position != nil, Content: ui.View(a.view)})
+	if position != nil {
+		// transferTab shows the populated window after positioning it, avoiding
+		// a visible jump from the default centered location.
+		if err := position.apply(a.win); err != nil {
+			a.status = "新窗口定位失败：" + err.Error()
+		}
+	}
 	a.win.OnEnterFullScreen(func() { a.fullscreenSettled(true) })
 	a.win.OnLeaveFullScreen(func() { a.fullscreenSettled(false) })
 	a.win.OnShow(a.refreshPaneVisibility)
@@ -250,20 +266,39 @@ func (h *applicationHub) confirmQuit(count int) {
 		})
 	}()
 }
-func (a *App) moveTabToNewWindow() {
-	if a.hub == nil || !a.canMoveTabToWindow(nil) {
+func (a *App) moveTabToNewWindow() { a.detachTabToWindow(a.activeTab()) }
+func (a *App) detachTabToWindow(t *tab) {
+	a.detachTabAt(t, nil)
+}
+func (a *App) detachTabAt(t *tab, position *tabWindowPosition) {
+	if a.hub == nil || t == nil || !a.canMoveTabToWindow(nil) {
 		return
 	}
-	t := a.activeTab()
-	if t == nil {
+	found := false
+	for _, existing := range a.tabs {
+		if existing == t {
+			found = true
+			break
+		}
+	}
+	if !found {
 		return
 	}
-	destination := a.hub.newWindow()
+	destination := a.hub.newWindowAt(position)
 	a.transferTab(t, destination)
 }
 func (a *App) transferTab(t *tab, destination *App) {
+	a.transferTabAt(t, destination, "", "", false)
+}
+
+// Move the existing tab tree; panes, transports and transfer tasks keep their
+// identity. Validate the complete destination before touching either window.
+func (a *App) transferTabAt(t *tab, destination *App, groupID, target string, after bool) bool {
 	if destination == nil || destination == a || t == nil || !a.canMoveTabToWindow(destination) {
-		return
+		return false
+	}
+	if a.stopped.Load() || destination.stopped.Load() || destination.tabByID(t.id) != nil || a.hub != nil && destination.hub != nil && a.hub != destination.hub {
+		return false
 	}
 	at := -1
 	for i, v := range a.tabs {
@@ -273,7 +308,31 @@ func (a *App) transferTab(t *tab, destination *App) {
 		}
 	}
 	if at < 0 {
-		return
+		return false
+	}
+	destination.ensureGroups()
+	g := destination.groupByID(groupID)
+	if groupID == "" {
+		g = destination.groupForNewTab()
+	}
+	if g == nil || g.hidden {
+		return false
+	}
+	insert := len(destination.tabs)
+	if target != "" {
+		other := destination.tabByID(target)
+		if other == nil || other.group != g.id {
+			return false
+		}
+		for i, candidate := range destination.tabs {
+			if candidate == other {
+				insert = i
+				break
+			}
+		}
+		if after {
+			insert++
+		}
 	}
 	sourceActive := a.activeTab()
 	a.tabs = append(a.tabs[:at], a.tabs[at+1:]...)
@@ -297,13 +356,14 @@ func (a *App) transferTab(t *tab, destination *App) {
 		}
 	}
 	a.challenges = retained
-	t.group = destination.groupForNewTab().id
-	destination.tabs = append(destination.tabs, t)
+	t.group = g.id
+	destination.tabs = append(destination.tabs, nil)
+	copy(destination.tabs[insert+1:], destination.tabs[insert:])
+	destination.tabs[insert] = t
 	destination.setCurrentTab(t, true)
 	if a.groups.root != nil {
 		a.pruneGroups()
 	}
-	destination.current = len(destination.tabs) - 1
 	if destination.win != nil {
 		destination.win.Show()
 		destination.win.Focus()
@@ -315,6 +375,13 @@ func (a *App) transferTab(t *tab, destination *App) {
 	if t.active != nil {
 		t.active.focus.Focus()
 	}
+	if len(a.tabs) == 0 {
+		// File workspaces belong to the application hub, not this terminal
+		// window, so closing it does not cancel their connections or transfers.
+		a.closeAfterTabMove = true
+		a.finishTabMoveClose()
+	}
+	return true
 }
 
 func (a *App) passwordLocked() bool {

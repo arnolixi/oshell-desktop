@@ -22,10 +22,12 @@ import (
 )
 
 type testSSH struct {
-	hostKey       ssh.PublicKey
-	terminalTypes chan string
-	address       string
-	auth          atomic.Int32
+	hostKey                          ssh.PublicKey
+	terminalTypes                    chan string
+	address                          string
+	auth                             atomic.Int32
+	keepAliveRequests                atomic.Int32
+	ignoreKeepAlive, rejectKeepAlive atomic.Bool
 }
 
 func startSSH(t *testing.T, password string, configure ...func(*ssh.ServerConfig)) *testSSH {
@@ -130,7 +132,10 @@ func startSSH(t *testing.T, password string, configure ...func(*ssh.ServerConfig
 							forwards.Range(func(k, v any) bool { k.(net.Listener).Close(); return true })
 							req.Reply(true, nil)
 						case "keepalive@openssh.com":
-							req.Reply(true, nil)
+							server.keepAliveRequests.Add(1)
+							if !server.ignoreKeepAlive.Load() {
+								req.Reply(!server.rejectKeepAlive.Load(), nil)
+							}
 						default:
 							req.Reply(false, nil)
 						}

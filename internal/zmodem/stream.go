@@ -6,6 +6,7 @@ import (
 	"io"
 	"net"
 	"strings"
+	"time"
 )
 
 type SendFile struct {
@@ -75,7 +76,7 @@ func ReceiveFiles(conn net.Conn, open func(ReceiveFile) (io.WriteCloser, error),
 	for {
 		frame, _, e := r.readHeader()
 		if e != nil {
-			return e
+			return fmt.Errorf("ZMODEM 等待发送端文件信息：%w", e)
 		}
 		switch frame {
 		case FrameZRQINIT:
@@ -127,10 +128,10 @@ func ReceiveFiles(conn net.Conn, open func(ReceiveFile) (io.WriteCloser, error),
 			closeErr := writer.Close()
 			r.writer = nil
 			if e != nil {
-				return e
+				return fmt.Errorf("ZMODEM 接收文件数据（%d / %d 字节）：%w", r.received, r.totalSize, e)
 			}
 			if closeErr != nil {
-				return closeErr
+				return fmt.Errorf("ZMODEM 保存下载文件：%w", closeErr)
 			}
 			index++
 			if e = r.sendZRINIT(); e != nil {
@@ -144,7 +145,10 @@ func ReceiveFiles(conn net.Conn, open func(ReceiveFile) (io.WriteCloser, error),
 			if len(options) > 0 {
 				confirm = options[0].ConfirmPrompt
 			}
-			return r.waitFinalOO(confirm)
+			if e := r.waitFinalOO(confirm); e != nil {
+				return fmt.Errorf("ZMODEM 等待传输结束确认：%w", e)
+			}
+			return nil
 		case FrameZABORT, FrameZFERR:
 			return ErrCancelled
 		default:
@@ -157,29 +161,59 @@ func ReceiveFiles(conn net.Conn, open func(ReceiveFile) (io.WriteCloser, error),
 func Cancel(conn io.Writer) { conn.Write(cancelEcho) }
 
 func (r *receiver) waitFinalOO(confirm func([]byte) bool) error {
+	// All file CRCs, ZEOF offsets and writer.Close calls have succeeded, and
+	// the sender has ended the batch with ZFIN. OO only releases the line;
+	// losing it must not hold the shell until the data activity timeout.
+	// Keep a bounded grace period, acknowledge repeated ZFINs, and return
+	// any shell output to the terminal instead of consuming it as protocol.
+	deadline := time.Now().Add(3 * time.Second)
 	var pending []byte
-	previousO := false
+	defer func() { r.reader.unread(pending) }()
 	for {
-		b, e := r.reader.readByte(receiveTimeout)
+		remaining := time.Until(deadline)
+		if remaining <= 0 || len(pending) >= 8192 {
+			return nil
+		}
+		b, e := r.reader.readByte(remaining)
+		if errors.Is(e, io.EOF) || errors.Is(e, errActivityTimeout) {
+			return nil
+		}
 		if e != nil {
 			return e
 		}
-		pending = append(pending, b)
-		if len(pending) > 8192 {
-			pending = append([]byte(nil), pending[len(pending)-8192:]...)
+		switch b {
+		case 0x11, 0x13, 0x91, 0x93:
+			continue
+		case '\r', '\n', 0x8a:
+			if len(pending) == 0 {
+				continue // ZHEX trailer, including lrzsz's high-bit LF.
+			}
 		}
-		if previousO && b == 'O' {
+		pending = append(pending, b)
+		if string(pending) == "OO" {
+			pending = nil
 			return nil
 		}
-		previousO = b == 'O'
-		if confirm != nil && confirm(pending) {
-			start := 0
-			for i, c := range pending {
-				if c == '\n' || c == '\r' || c == 0x8a {
-					start = i + 1
+		// ZFIN is a hex header even when file data uses binary CRC32.
+		// Inspect only a complete suffix, validate its CRC, then consume it
+		// exactly once. One or several padding '*' bytes are legal.
+		start := len(pending) - 17
+		if start >= 0 && pending[start] == ZPAD && pending[start+1] == ZDLE && pending[start+2] == ZHEX {
+			frame, _, ok := DecodeHexHeader(pending, start+3)
+			if ok && (frame == FrameZFIN || frame == FrameZABORT || frame == FrameZFERR) {
+				for start > 0 && pending[start-1] == ZPAD {
+					start--
+				}
+				pending = pending[:start]
+				if frame != FrameZFIN {
+					return ErrCancelled
+				}
+				if _, e = r.conn.Write(BuildZhexHeader(FrameZFIN, 0)); e != nil {
+					return e
 				}
 			}
-			r.reader.unread(pending[start:])
+		}
+		if confirm != nil && confirm(pending) {
 			return nil
 		}
 	}

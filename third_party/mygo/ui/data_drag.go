@@ -75,7 +75,7 @@ func (rt *engine) dataTargetAt(x, y float32, d *platform.DataDragEvent) *state {
 			continue
 		}
 		if s.accepts != nil && d.Local != nil && s.accepts(d.Local) {
-			d.Operation = transfer.Negotiate(d.Offer.Operations, transfer.Copy, d.Offer.Suggested)
+			d.Operation = transfer.Negotiate(d.Offer.Operations, transfer.Copy|transfer.Move, d.Offer.Suggested)
 			if d.Operation != transfer.None {
 				return s
 			}

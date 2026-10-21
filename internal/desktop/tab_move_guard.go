@@ -7,7 +7,7 @@ func (a *App) canMoveTabToWindow(destination *App) bool {
 		a.status = "请先解锁窗口，再移动标签"
 		return false
 	}
-	if tabMoveDialogOpen(a.win) {
+	if tabMoveDialogOpen(a.win) || destination != nil && tabMoveDialogOpen(destination.win) {
 		a.status = "请先完成或取消文件选择弹窗，再移动标签"
 		return false
 	}

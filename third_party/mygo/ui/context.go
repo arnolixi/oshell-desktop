@@ -494,6 +494,7 @@ type state struct {
 	// dragged (Drop), and droppedValue is the value dropped on it, while
 	// hasDropped, at (dropX, dropY).
 	dragValue    any
+	dragOutside  func()
 	dragFn       func() any
 	accepts      func(any) bool
 	droppedValue any
@@ -562,6 +563,7 @@ func (rt *engine) lookState(id uint64) (s *state, built bool) {
 	s.seen, s.pass = rt.frame, rt.pass
 	// What the element drags and takes, as this pass asks.
 	s.dragValue, s.dragFn, s.accepts = nil, nil, nil
+	s.dragOutside = nil
 	s.dataSource, s.dataTarget = nil, nil
 	return s, built
 }

@@ -11,12 +11,13 @@ import (
 )
 
 type SyncOptions struct {
-	RequireExisting bool   `json:"requireExisting,omitempty"`
-	Version         int    `json:"version"`
-	Enabled         bool   `json:"enabled"`
-	Backend         string `json:"backend"`
-	Address         string `json:"address"`
-	Username        string `json:"username,omitempty"`
+	TrustedServerCertificate WebDAVCertificate `json:"trustedServerCertificate,omitzero"`
+	RequireExisting          bool              `json:"requireExisting,omitempty"`
+	Version                  int               `json:"version"`
+	Enabled                  bool              `json:"enabled"`
+	Backend                  string            `json:"backend"`
+	Address                  string            `json:"address"`
+	Username                 string            `json:"username,omitempty"`
 }
 
 var ErrSyncSettingsLocked = errors.New("WebDAV 设置已加密，请先解锁主密码")
@@ -61,7 +62,11 @@ func (o SyncOptions) CredentialProfile() Profile {
 func (o SyncOptions) Transport(password, localDirectory string) (SyncTransport, error) {
 	switch o.Backend {
 	case "webdav":
-		return NewWebDAVTransport(o.Address, o.Username, password, false)
+		w, err := NewWebDAVTransport(o.Address, o.Username, password, false)
+		if err == nil && w.directory.Scheme == "https" && o.TrustedServerCertificate != (WebDAVCertificate{}) {
+			err = w.trustCertificate(o.TrustedServerCertificate)
+		}
+		return w, err
 	case "directory":
 		path, e := filepath.Abs(strings.TrimSpace(o.Address))
 		if e != nil {
@@ -103,6 +108,14 @@ func saveSyncOptionsLocked(dir string, o SyncOptions, master ...[]byte) error {
 	if o.Version != 1 {
 		return fmt.Errorf("同步设置版本无效")
 	}
+	if o.Backend != "webdav" || !o.Enabled || IsHTTPWebDAV(o.Address) {
+		o.TrustedServerCertificate = WebDAVCertificate{}
+	}
+	if o.TrustedServerCertificate != (WebDAVCertificate{}) {
+		if err := o.TrustedServerCertificate.Validate(o.Address); err != nil {
+			return err
+		}
+	}
 	data, e := json.MarshalIndent(o, "", "  ")
 	if e != nil {
 		return e
@@ -126,6 +139,7 @@ func saveSyncOptionsLocked(dir string, o SyncOptions, master ...[]byte) error {
 			// Native OShell removes disabled WebDAV login settings.
 			o.Address = ""
 			o.Username = ""
+			o.TrustedServerCertificate = WebDAVCertificate{}
 			data, e = json.MarshalIndent(o, "", "  ")
 			if e != nil {
 				return e

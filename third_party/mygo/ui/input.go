@@ -74,6 +74,11 @@ func (rt *engine) event(ev platform.SurfaceEvent) (taken bool) {
 		rt.blinkStart = time.Now()
 		rt.requestFrame()
 	case platform.SurfaceBlur:
+		// Native drag tracking owns cancellation and may change focus while
+		// crossing windows. Only an in-window value drag ends on blur.
+		if rt.drag == nil || !rt.drag.native {
+			rt.dragCancel()
+		}
 		rt.windowFocused = false
 		rt.selection.dragging = false
 		// Keys let go of elsewhere never come back up here.

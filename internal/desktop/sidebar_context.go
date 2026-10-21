@@ -72,6 +72,13 @@ func (a *App) sessionActionGroup() string {
 
 func (a *App) sidebarContextMenu(c *ui.Context, m *ui.Menu, id string) {
 	a.withSidebarContext(id, func() { a.managerContextMenu(c, m, id) })
+	m.Separator()
+	if m.Item("全部展开").Chosen() {
+		a.setSidebarExpanded(true)
+	}
+	if m.Item("全部收缩").Chosen() {
+		a.setSidebarExpanded(false)
+	}
 }
 
 func (a *App) sidebarItemActions(c *ui.Context, item ui.Element, id string) {

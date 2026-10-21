@@ -3620,6 +3620,18 @@ func (_handle Element) NoWrap() Element {
 	return wrapElement(_node.NoWrap())
 }
 
+// OnDragOutside runs when a value drag is released outside the window's
+// client area. Escape, focus loss and in-window drops never invoke it.
+func (_handle Element) OnDragOutside(done func()) Element {
+	_node := _handle.node()
+	if _node == nil {
+		return Element{}
+	}
+	_ctx := _node.c
+	_ = _ctx
+	return wrapElement(_node.OnDragOutside(func() { done() }))
+}
+
 // Opacity makes the element and its children translucent.
 func (_handle Element) Opacity(o float32) Element {
 	_node := _handle.node()

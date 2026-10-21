@@ -80,7 +80,15 @@ func TestWebDAVConditionalWrite(t *testing.T) {
 			w.WriteHeader(401)
 			return
 		}
-		if r.URL.Path != "/vault/oshell-vault.json" {
+		if r.Method == "GET" && r.URL.Path == "/vault/oshell-vault.json" {
+			w.WriteHeader(404)
+			return
+		}
+		if r.Method == "PROPFIND" && r.URL.Path == "/vault/oshell/" {
+			writeDAVCollection(w, r.URL.Path)
+			return
+		}
+		if r.URL.Path != "/vault/oshell/oshell-vault.json" {
 			t.Errorf("path %s", r.URL.Path)
 		}
 		switch r.Method {
@@ -109,7 +117,7 @@ func TestWebDAVConditionalWrite(t *testing.T) {
 		}
 	}))
 	defer server.Close()
-	transport, e := NewWebDAVTransport(server.URL+"/vault", "test-user", "test-password", true)
+	transport, e := NewWebDAVTransport(server.URL+"/vault", "test-user", "test-password", false)
 	if e != nil {
 		t.Fatal(e)
 	}

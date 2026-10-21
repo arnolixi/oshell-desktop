@@ -50,7 +50,8 @@ type DragOptions struct {
 	Done func(Result)
 }
 
-// Result reports the destination's final effect. None means no drop.
+// Result reports the destination's final effect. None means no drop;
+// it does not imply cancellation when the user released outside a target.
 type Result struct {
 	Operation Operation
 	Canceled  bool

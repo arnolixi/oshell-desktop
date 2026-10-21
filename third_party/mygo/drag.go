@@ -119,9 +119,6 @@ func (s *dataSource) finish(result transfer.Result) {
 	if result.Err != nil || result.Canceled {
 		result.Operation = transfer.None
 	}
-	if result.Operation == transfer.None && result.Err == nil {
-		result.Canceled = true
-	}
 	if activeDataDrag == s {
 		activeDataDrag = nil
 	}

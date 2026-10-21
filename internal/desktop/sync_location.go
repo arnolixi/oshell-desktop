@@ -18,63 +18,48 @@ func (a *App) syncLocationSettings(c *ui.Context) {
 		})
 		ui.Button(c, "设置 / 解锁主密码…").OnClick(a.showVault)
 	})
-	ui.Text(c, "iCloud / 自定义同步目录").Bold()
-	ui.Row(c).Gap(8).Children(func() {
-		ui.Button(c, "新建同步目录…").Disabled(f.busy || a.configurationBusy()).OnClick(func() { a.chooseSyncDirectory("create") })
-		ui.Button(c, "连接已有同步目录…").Disabled(f.busy || a.configurationBusy()).OnClick(func() { a.chooseSyncDirectory("existing") })
-	})
 	if f.pendingDirectory != nil {
-		ui.Text(c, "重启后生效："+f.pendingDirectory.Path).Wrap()
-		ui.Button(c, "取消待生效设置").Disabled(f.busy).OnClick(func() {
-			f.pendingDirectory = nil
-			f.directoryChanged = true
-			f.status = "取消目录设置已暂存，点击应用后生效"
-		})
+		ui.Text(c, "旧版待生效目录："+f.pendingDirectory.Path).Wrap()
+		ui.Button(c, "取消待生效设置").OnClick(func() { f.pendingDirectory = nil; f.directoryChanged = true })
 	}
-	ui.Button(c, "停用目录同步").Disabled(f.busy || a.configurationBusy()).OnClick(func() {
-		f.directoryDisabled = true
-		f.directoryChanged = true
-		f.pendingDirectory = nil
-		f.status = "停用目录同步已暂存，点击应用后生效"
-	})
-	ui.Text(c, "会话始终在本地读写。新目录需为空，已有目录需包含可解密的同步数据；点击应用后保存，重启生效。").FontSize(11).TextColor(c.Theme().TextMuted)
+	ui.Text(c, "只切换同步目标，本机工作目录和原共享文件均保留。").TextColor(c.Theme().TextMuted)
 }
-func (a *App) chooseSyncDirectory(mode string) {
+
+func (a *App) selectSyncMethod(method string) {
 	f := &a.features.sharedSync
-	if f.busy || a.configurationBusy() {
-		return
+	f.directoryGeneration++
+	f.method = method
+	a.cancelWebDAVProbe()
+	f.options.Enabled = method != "none"
+	if method != "none" && method != f.options.Backend {
+		f.options.Backend = method
+		f.options.Address, f.options.Username, f.password = "", "", ""
+		f.options.TrustedServerCertificate = core.WebDAVCertificate{}
+		f.options.RequireExisting = false
 	}
-	master, err := a.vault.MasterSecret()
-	if err != nil {
-		f.status = err.Error()
-		return
+	f.status = "尚未应用，当前同步目标保持不变"
+	if f.options.Enabled {
+		protected, locked := a.vault.State()
+		if !protected || locked {
+			a.showVault()
+		}
 	}
-	f.busy = true
-	a.setConfigurationBusy(true)
-	parent := a.preferencesWindow
+}
+
+func (a *App) chooseLiveSyncDirectory() {
+	f := &a.features.sharedSync
 	generation := f.directoryGeneration
 	go func() {
-		defer clear(master)
-		var pending *core.PendingSyncDirectory
-		paths, err := mygo.Dialog.Open(mygo.OpenDialogOptions{Parent: parent, Title: "选择加密同步目录", Directory: true})
-		if err == nil && len(paths) > 0 {
-			pending, err = core.ValidateSyncDirectorySelection(a.store.Dir, paths[0], mode, master)
-		}
+		paths, err := mygo.Dialog.Open(mygo.OpenDialogOptions{Parent: a.preferencesWindow, Title: "选择同步目录（自动识别已有配置）", Directory: true})
 		a.post(func() {
-			f.busy = false
-			a.setConfigurationBusy(false)
-			if generation != f.directoryGeneration || !a.settingsOpen {
+			if !a.settingsOpen || generation != f.directoryGeneration || f.options.Backend != "directory" {
 				return
 			}
 			if err != nil {
 				f.status = err.Error()
-				return
-			}
-			if len(paths) > 0 {
-				f.pendingDirectory = pending
-				f.directoryChanged = true
-				f.directoryDisabled = false
-				f.status = "目录选择已暂存，点击应用后保存，重启后启用"
+			} else if len(paths) > 0 {
+				f.options.Address = paths[0]
+				f.status = "目录已选择，点击应用立即生效"
 			}
 		})
 	}()

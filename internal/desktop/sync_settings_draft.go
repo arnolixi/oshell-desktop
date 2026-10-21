@@ -2,6 +2,7 @@ package desktop
 
 import (
 	"fmt"
+	"oshell-desktop/internal/core"
 )
 
 func (a *App) syncOptionsChanged() bool {
@@ -40,13 +41,21 @@ func (a *App) validateSyncDraft() error {
 			return err
 		}
 	}
-	if options.Enabled && options.Backend == "webdav" {
-		if f.pendingDirectory != nil || saved.Enabled && saved.Backend == "directory" && !f.directoryDisabled {
-			return fmt.Errorf("请先停用目录同步并取消待生效目录设置，再启用 WebDAV")
-		}
+	if f.pendingDirectory != nil && !f.directoryChanged {
+		return fmt.Errorf("存在旧版待生效目录，请先重启完成迁移或取消待生效设置")
 	}
-	if f.directoryChanged && f.pendingDirectory != nil && options.Enabled && options.Backend == "webdav" {
-		return fmt.Errorf("请先取消启用 WebDAV，再选择目录同步")
+	if options.Enabled && options.Backend == "directory" && (saved.Backend != "directory" || saved.Address != options.Address || !saved.Enabled) {
+		master, err := a.vault.MasterSecret()
+		if err != nil {
+			return err
+		}
+		defer clear(master)
+		pending, err := core.ValidateSyncDirectoryTarget(a.store.Dir, options.Address, master)
+		if err != nil {
+			return err
+		}
+		f.options.Address = pending.Path
+		f.options.RequireExisting = pending.Mode == "existing"
 	}
 	return nil
 }

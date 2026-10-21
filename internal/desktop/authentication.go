@@ -15,6 +15,9 @@ type authenticationAnswer struct {
 	err        error
 }
 type authenticationChallenge struct {
+	host                *core.HostPrompt
+	sequence            uint64
+	finished            bool
 	protection          string
 	pane                *pane
 	id                  string
@@ -33,31 +36,117 @@ func askAuthentication(ctx context.Context, p *pane, request core.Authentication
 
 func askAuthenticationWithSaving(ctx context.Context, p *pane, request core.AuthenticationPrompt, allowSave bool) authenticationAnswer {
 	challenge := &authenticationChallenge{allowSave: allowSave, pane: p, id: core.NewID(), ctx: ctx, request: request, answers: make([]string, len(request.Questions)), open: true, done: make(chan authenticationAnswer, 1)}
+	return waitAuthentication(ctx, p, challenge)
+}
+
+func askHostAuthentication(ctx context.Context, p *pane, host core.HostPrompt) bool {
+	if host.Context != nil {
+		ctx = host.Context
+	}
+	challenge := &authenticationChallenge{host: &host, pane: p, id: core.NewID(), ctx: ctx, request: core.AuthenticationPrompt{Title: "首次连接：核对服务器指纹"}, open: true, done: make(chan authenticationAnswer, 1)}
+	return waitAuthentication(ctx, p, challenge).err == nil
+}
+
+func waitAuthentication(ctx context.Context, p *pane, challenge *authenticationChallenge) authenticationAnswer {
 	if !postPane(p, func(a *App) {
 		if ctx.Err() == nil {
 			challenge.protection = "local"
 			if a.vault != nil {
 				challenge.protection = a.vault.CredentialProtection(p.profile.ID)
 			}
-			a.challenges = append(a.challenges, challenge)
+			a.enqueueChallenge(challenge)
 		}
 	}) {
 		return authenticationAnswer{err: context.Canceled}
 	}
 	select {
 	case result := <-challenge.done:
+		if ctx.Err() != nil {
+			return authenticationAnswer{err: ctx.Err()}
+		}
 		return result
 	case <-ctx.Done():
 		postPane(p, func(a *App) {
-			if a.hub != nil {
-				for _, w := range a.hub.windows {
-					w.removeChallenge(challenge)
-				}
-			} else {
-				a.removeChallenge(challenge)
-			}
+			a.finishChallenge(challenge, true)
 		})
 		return authenticationAnswer{err: ctx.Err()}
+	}
+}
+
+func (a *App) enqueueChallenge(q *authenticationChallenge) {
+	if a.hub != nil {
+		a.hub.authenticationSequence++
+		q.sequence = a.hub.authenticationSequence
+	}
+	a.challenges = append(a.challenges, q)
+	a.refreshAuthentication()
+}
+
+func (a *App) authenticationWindows() []*App {
+	if a.hub != nil {
+		return a.hub.configurationWindows()
+	}
+	return []*App{a}
+}
+
+// Queue only operator prompts, never the connection handshake or its ready
+// callback. A connection that can authenticate unattended must keep running.
+func (a *App) nextChallenge() *authenticationChallenge {
+	var next *authenticationChallenge
+	blocked := false
+	for _, w := range a.authenticationWindows() {
+		for _, q := range append([]*authenticationChallenge(nil), w.challenges...) {
+			if q.ctx.Err() != nil || q.pane.closed || w.stopped.Load() {
+				w.finishChallenge(q, true)
+			}
+		}
+		if w.stopped.Load() {
+			continue
+		}
+		blocked = blocked || w.nonAuthenticationModalActive()
+		for _, q := range w.challenges {
+			if next == nil || q.sequence < next.sequence {
+				next = q
+			}
+		}
+	}
+	if blocked {
+		return nil
+	}
+	return next
+}
+
+func (a *App) refreshAuthentication() {
+	if a.hub == nil {
+		return
+	}
+	q := a.nextChallenge()
+	if a.hub.authenticationReady == q {
+		return
+	}
+	a.hub.authenticationReady = q
+	for _, w := range a.authenticationWindows() {
+		if w.win != nil {
+			w.win.Invalidate()
+		}
+	}
+}
+
+func (a *App) finishChallenge(q *authenticationChallenge, cancelled bool) {
+	if q.finished {
+		return
+	}
+	q.finished = true
+	result := authenticationAnswer{values: append([]string(nil), q.answers...), remember: q.allowSave && q.remember, protection: q.protection}
+	if cancelled || q.ctx.Err() != nil || q.pane.closed {
+		result = authenticationAnswer{err: context.Canceled}
+	}
+	q.done <- result
+	for _, w := range a.authenticationWindows() {
+		w.removeChallenge(q)
+		if w.win != nil {
+			w.win.Invalidate()
+		}
 	}
 }
 func (a *App) removeChallenge(challenge *authenticationChallenge) {
@@ -72,26 +161,11 @@ func (a *App) removeChallenge(challenge *authenticationChallenge) {
 	}
 }
 func (a *App) authenticationChallengeDialog(c *ui.Context) {
-	for len(a.challenges) > 0 && a.challenges[0].ctx.Err() != nil {
-		a.removeChallenge(a.challenges[0])
-	}
-	if len(a.challenges) == 0 {
+	q := a.nextChallenge()
+	if q == nil || q.pane.owner.Load() != a {
 		return
 	}
-	q := a.challenges[0]
-	finish := func(cancelled bool) {
-		result := authenticationAnswer{values: append([]string(nil), q.answers...), remember: q.allowSave && q.remember, protection: q.protection}
-		if cancelled {
-			result.values = nil
-			result.remember = false
-			result.err = context.Canceled
-		}
-		select {
-		case q.done <- result:
-		default:
-		}
-		a.removeChallenge(q)
-	}
+	finish := func(cancelled bool) { a.finishChallenge(q, cancelled) }
 	ui.Modal(c.Key(q.id), &q.open, func() {
 		ui.Column(c).Width(500).Gap(12).Children(func() {
 			title := q.request.Title
@@ -99,7 +173,16 @@ func (a *App) authenticationChallengeDialog(c *ui.Context) {
 				title = "服务器认证"
 			}
 			ui.Text(c, title).FontSize(18).Bold()
-			ui.Text(c, fmt.Sprintf("%s@%s:%d", q.request.Identity.User, q.request.Identity.Host, q.request.Identity.Port))
+			if q.pane.profile.Name != "" {
+				ui.Text(c, q.pane.profile.Name).Bold()
+			}
+			if q.host != nil {
+				ui.Text(c, q.host.Address).Wrap()
+				ui.Text(c, q.host.Algorithm+"\n"+q.host.Fingerprint).Wrap()
+				ui.Text(c, "请与服务器管理员提供的指纹核对。信任后将保存到 OShell 的 known_hosts。").Wrap()
+			} else {
+				ui.Text(c, fmt.Sprintf("%s@%s:%d", q.request.Identity.User, q.request.Identity.Host, q.request.Identity.Port))
+			}
 			if q.request.Name != "" {
 				ui.Text(c, q.request.Name)
 			}
@@ -110,7 +193,7 @@ func (a *App) authenticationChallengeDialog(c *ui.Context) {
 				for i, prompt := range q.request.Questions {
 					ui.Field(c.Key(fmt.Sprint(i)), prompt, func() {
 						input := ui.TextInput(c, &q.answers[i]).Label(prompt)
-						if !q.request.Echo[i] {
+						if i >= len(q.request.Echo) || !q.request.Echo[i] {
 							passwordSelection(input, &q.answers[i])
 						}
 						if i == 0 {
@@ -126,8 +209,13 @@ func (a *App) authenticationChallengeDialog(c *ui.Context) {
 				}
 			}
 			ui.Row(c).Justify(ui.End).Gap(8).Children(func() {
-				ui.Button(c, "取消").OnClick(func() { finish(true) })
-				ui.PrimaryButton(c, "继续认证").OnClick(func() { finish(false) })
+				cancel := ui.Button(c, "取消").OnClick(func() { finish(true) })
+				label := "继续认证"
+				if q.host != nil {
+					label = "信任并连接"
+					cancel.AutoFocus()
+				}
+				ui.PrimaryButton(c, label).OnClick(func() { finish(false) })
 			})
 		})
 	})

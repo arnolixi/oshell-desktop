@@ -20,20 +20,20 @@ func TestUnifiedHeaderFitsMinimumWindowAndRoutesMenus(t *testing.T) {
 		a := newApp(&core.Store{Dir: t.TempDir()}, cfg)
 		tt := ui.NewTester(a.view, 880, 560)
 		tt.Frame()
-		header, ok := tt.Find("主工具栏")
-		if !ok || header.H != 38 {
-			t.Fatalf("unexpected header: %+v", header)
-		}
-		for _, label := range []string{"OShell", "会话", "快捷连接", "编辑", "视图", "窗口", "快速命令", "工具", "标签组", "排列", "会话管理", "文件管理", "会话侧栏", "设置"} {
-			r, ok := tt.Find(label)
-			if !ok || r.X < 0 || r.X+r.W > 880 || r.Y < header.Y || r.Y+r.H > header.Y+header.H {
-				t.Fatalf("header entry %q clipped: %+v", label, r)
-			}
-		}
 		if dark {
 			snapshot(t, tt, "unified-header-dark.png")
 		} else {
 			snapshot(t, tt, "unified-header-light.png")
+		}
+		header, ok := tt.Find("主工具栏")
+		if !ok || header.H != 38 {
+			t.Fatalf("unexpected header: %+v", header)
+		}
+		for _, label := range []string{"OShell", "会话", "快捷连接", "编辑", "视图", "窗口", "快速命令", "工具", "标签组", "排列", "会话管理", "文件管理", "会话侧栏", "多设备同步", "设置"} {
+			r, ok := tt.Find(label)
+			if !ok || r.X < 0 || r.X+r.W > 880 || r.Y < header.Y || r.Y+r.H > header.Y+header.H {
+				t.Fatalf("header entry %q clipped: %+v", label, r)
+			}
 		}
 		for _, visible := range []bool{false, true} {
 			if err := tt.Click("会话侧栏"); err != nil {
@@ -124,5 +124,16 @@ func TestUnifiedHeaderFileManagerWithoutTerminal(t *testing.T) {
 	a.performAction("fileManager")
 	if a.features.switcher.open || len(files.tabs) != 0 {
 		t.Fatal("existing file window was not reused")
+	}
+}
+
+func TestUnifiedHeaderSyncWithoutTerminal(t *testing.T) {
+	a := newApp(&core.Store{Dir: t.TempDir()}, core.DefaultConfig())
+	tt := ui.NewTester(a.view, 880, 560)
+	if err := tt.Click("多设备同步"); err != nil {
+		t.Fatal(err)
+	}
+	if !a.settingsOpen || a.features.settingsTab != 3 || len(a.tabs) != 0 {
+		t.Fatal("sync entry required a terminal or opened the wrong settings")
 	}
 }

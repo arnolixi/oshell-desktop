@@ -264,7 +264,8 @@ func (a *App) managerView(c *ui.Context) {
 			r := rows[row]
 			p := r.profile
 			textColor, iconColor := c.Theme().Text, c.Theme().Accent
-			if a.managerSelection.Has(r.id) || a.managerSelection.Len() == 0 && a.managerRow == row {
+			selected := a.managerSelection.Has(r.id) || a.managerSelection.Len() == 0 && a.managerRow == row
+			if selected {
 				textColor = c.Theme().AccentText
 				iconColor = textColor
 			}
@@ -286,16 +287,14 @@ func (a *App) managerView(c *ui.Context) {
 				if a.managerNameEditor(c, r) {
 					return
 				}
-				icon := terminalIcon
-				if r.linkID != "" {
-					icon = linkIcon
-				}
+				style := sessionIconFor(p.Kind, r.linkID != "", r.folder, r.parent)
+				tip := sessionListTooltip(p, r.linkID != "")
 				if r.folder {
-					icon = folderIcon
+					tip = style.label + "\n/" + r.group
 				}
 				cell := ui.Row(c).FillWidth().Height(32).Gap(7).Children(func() {
-					ui.Icon(c, icon).FontSize(15).TextColor(iconColor)
-					ui.RichText(c, managerSearchSpans(r.name, query)...).SingleLine().Tooltip(r.name).Grow(1).MinWidth(0)
+					style.draw(c, selected)
+					ui.RichText(c, managerSearchSpans(r.name, query)...).SingleLine().Tooltip(tip).TextColor(textColor).Grow(1).MinWidth(0)
 
 				})
 				cell.HandleInput(func(ev ui.InputEvent) bool { return a.managerCellInput(r, ev) })

@@ -19,6 +19,12 @@ func (a *App) toolbar(c *ui.Context) {
 			a.status = "日志记录失败：" + err.Error()
 		}
 	}
+	width, _ := c.Size()
+	gap := float32(5)
+	sidebarText := "侧栏"
+	if width < 1000 {
+		gap, sidebarText = 3, ""
+	}
 	ui.Toolbar(c, func() {
 		visible := a.localUI.SidebarVisible
 		hint := "显示会话侧栏"
@@ -28,7 +34,7 @@ func (a *App) toolbar(c *ui.Context) {
 		if a.localUI.SidebarShortcut.Valid() {
 			hint += "（" + a.localUI.SidebarShortcut.Display(runtime.GOOS) + "）"
 		}
-		sidebar := toolButton(c.Key("sidebar-toggle"), "会话侧栏", sidebarIcon, "侧栏").
+		sidebar := toolButton(c.Key("sidebar-toggle"), "会话侧栏", sidebarIcon, sidebarText).
 			Shrink(0).Role(ui.RoleToggleButton).Checked(visible).Tooltip(hint).
 			Disabled(a.passwordLocked() || a.modalActive()).OnClick(a.toggleSidebar)
 		if visible {
@@ -60,8 +66,9 @@ func (a *App) toolbar(c *ui.Context) {
 		toolButton(c, "会话管理", terminalIcon, "").Shrink(0).OnClick(func() { a.performAction("sessionManager") })
 		toolButton(c, "文件管理", folderIcon, "").Shrink(0).OnClick(func() { a.performAction("fileManager") })
 		toolButton(c, "设置", settingsIcon, "").Shrink(0).OnClick(func() { a.performAction("settings") })
+		a.syncToolbar(c)
 		a.updateToolbar(c)
-	}).Height(38).Padding(6, 8).Gap(5).Background(c.Theme().Background).BorderWidth(0, 0, 1, 0).BorderColor(c.Theme().Border).Label("主工具栏")
+	}).Height(38).Padding(6, 8).Gap(gap).Background(c.Theme().Background).BorderWidth(0, 0, 1, 0).BorderColor(c.Theme().Border).Label("主工具栏")
 }
 
 // Build on opening so saved sessions, commands and shortcuts are current.

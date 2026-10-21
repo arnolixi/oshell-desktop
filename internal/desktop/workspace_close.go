@@ -2,6 +2,21 @@ package desktop
 
 import "github.com/egoist/mygo"
 
+func (a *App) finishTabMoveClose() {
+	if !a.closeAfterTabMove || a.win == nil || a.stopped.Load() {
+		return
+	}
+	if len(a.tabs) != 0 {
+		a.closeAfterTabMove = false
+		return
+	}
+	if a.tabNativeDrag || a.features.sharedSync.busy || a.features.sessionPassword.busy || a.features.localConflict.active {
+		return
+	}
+	a.closeAfterTabMove = false
+	a.win.Close()
+}
+
 // All workspace windows must keep processing completion events while a shared
 // sync is running: committing holds the application's configuration busy flag.
 func (a *App) onWorkspaceClose(event *mygo.CloseEvent) {

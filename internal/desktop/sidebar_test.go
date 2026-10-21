@@ -84,3 +84,76 @@ func TestSidebarSearchRestoresExpansionAndHeaderSettings(t *testing.T) {
 	settings.Frame()
 	snapshot(t, settings, "selection-settings.png")
 }
+
+func TestSidebarBulkExpansionAndFilteredState(t *testing.T) {
+	a, tt := sidebarContextFixture(t)
+	a.config.Directories = append(a.config.Directories, "empty/nested")
+	before, _ := json.Marshal(a.config)
+	if err := tt.Click("全部收缩"); err != nil {
+		t.Fatal(err)
+	}
+	tt.Frame()
+	if tt.HasText("sidebar-source") || tt.HasText("nested") {
+		t.Fatal("collapse left child rows visible")
+	}
+	if err := tt.Click("全部展开"); err != nil {
+		t.Fatal(err)
+	}
+	tt.Frame()
+	if !tt.HasText("sidebar-source") || !tt.HasText("sidebar-alias") || !tt.HasText("nested") {
+		t.Fatal("expand missed sessions, links or empty folders")
+	}
+	a.sidebar.query = "sidebar-source"
+	tt.Frame()
+	if err := tt.Click("全部收缩"); err != nil {
+		t.Fatal(err)
+	}
+	tt.Frame()
+	if tt.HasText("sidebar-source") {
+		t.Fatal("filtered collapse did not persist")
+	}
+	tt.Frame()
+	if tt.HasText("sidebar-source") {
+		t.Fatal("refresh reopened filtered folders")
+	}
+	if err := tt.Click("全部展开"); err != nil {
+		t.Fatal(err)
+	}
+	tt.Frame()
+	if !tt.HasText("sidebar-source") || tt.HasText("sidebar-alias") || tt.HasText("nested") {
+		t.Fatal("filtered expansion escaped results")
+	}
+	if err := tt.Click("全部收缩"); err != nil {
+		t.Fatal(err)
+	}
+	a.sidebar.query = ""
+	tt.Frame()
+	if !tt.HasText("sidebar-alias") || !tt.HasText("nested") {
+		t.Fatal("filtered actions changed original expansion")
+	}
+	if err := tt.RightClick("team"); err != nil {
+		t.Fatal(err)
+	}
+	if err := tt.ChooseMenuItem("全部收缩"); err != nil {
+		t.Fatal(err)
+	}
+	tt.Frame()
+	if tt.HasText("sidebar-source") {
+		t.Fatal("context action did not collapse")
+	}
+	if err := tt.RightClick("会话侧栏列表"); err != nil {
+		t.Fatal(err)
+	}
+	if err := tt.ChooseMenuItem("全部展开"); err != nil {
+		t.Fatal(err)
+	}
+	tt.Frame()
+	if !tt.HasText("sidebar-source") {
+		t.Fatal("background context action did not expand")
+	}
+	after, _ := json.Marshal(a.config)
+	if string(before) != string(after) {
+		t.Fatal("tree actions changed session configuration")
+	}
+	snapshot(t, tt, "sidebar-bulk-expansion.png")
+}

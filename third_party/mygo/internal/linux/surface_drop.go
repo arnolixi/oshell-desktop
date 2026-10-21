@@ -202,14 +202,17 @@ func loadDrops() {
 			// our explicit cancellation must remain a cancellation.
 			explicit := s.dragCanceled
 			canceled := explicit || result == 1 || result == 2
-			s.dragCanceled = true
+			s.dragCanceled = explicit || result == 2
+			s.dragNoTarget = result == 1
 			if !canceled && result > 2 {
 				s.dragError = errors.New("mygo: GTK drag failed")
 			}
 			// An explicit cancel (including destruction) must release the
 			// tracker immediately, without a snap-back animation holding
 			// the input grab after the app reports cancellation.
-			return explicit
+			// No-target release may be handled by the app (for example by
+			// detaching a tab). Do not delay completion with snap-back.
+			return explicit || s.dragNoTarget
 		}
 		return false
 	})
@@ -223,7 +226,7 @@ func loadDrops() {
 		}
 		r := s.dragRequest
 		op := goGTKOperations(gdkDragContextSelected(context))
-		if s.dragCanceled || s.dragError != nil {
+		if s.dragCanceled || s.dragNoTarget || s.dragError != nil {
 			op = transfer.None
 		}
 		delete(gtkDataSources, widget)
@@ -232,7 +235,7 @@ func loadDrops() {
 			gdkEventFree(s.lastPointer)
 			s.lastPointer = 0
 		}
-		r.Done(transfer.Result{Operation: op, Canceled: op == transfer.None && s.dragError == nil, Err: s.dragError})
+		r.Done(transfer.Result{Operation: op, Canceled: s.dragCanceled, Err: s.dragError})
 	})
 	// The app's Done callback owns removal after a successful move.
 	cbSurfaceDragDelete = purego.NewCallback(func(widget, context, data ptr) {})
@@ -334,7 +337,7 @@ func (s *surface) StartDataDrag(r platform.DragRequest) {
 	targets := gtkTargets(append(r.Data.Formats(), platform.DragSessionFormat))
 	list := gtkTargetListNew(unsafe.Pointer(&targets[0]), uint32(len(targets)))
 	defer gtkTargetListUnref(list)
-	s.dragRequest, s.dragError, s.dragCanceled = &r, nil, false
+	s.dragRequest, s.dragError, s.dragCanceled, s.dragNoTarget = &r, nil, false, false
 	gtkDataSources[s.area] = s
 	s.dragContext = gtkDragBeginCoordinates(s.area, list, gtkOperations(r.Operations), 1, s.lastPointer, int32(r.X), int32(r.Y))
 	if s.dragContext == 0 {

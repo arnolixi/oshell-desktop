@@ -509,11 +509,9 @@ func (a *App) updateToolbar(c *ui.Context) {
 		label = "安装更新"
 	}
 	text := label
-	if a.win != nil {
-		w, _ := a.win.Size()
-		if w < 1000 {
-			text = ""
-		}
+	width, _ := c.Size()
+	if width < 1000 {
+		text = ""
 	}
 	toolButton(c, label, arrowUpIcon, text).Disabled(state.busy || state.confirming).OnClick(a.invokeUpdater)
 }

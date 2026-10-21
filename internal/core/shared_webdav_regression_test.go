@@ -22,7 +22,15 @@ func TestSharedWebDAVMultiNodeMergeAndStaleWrite(t *testing.T) {
 			w.WriteHeader(http.StatusUnauthorized)
 			return
 		}
-		if r.URL.Path != "/vault/oshell-vault.json" {
+		if r.Method == "GET" && r.URL.Path == "/vault/oshell-vault.json" {
+			w.WriteHeader(404)
+			return
+		}
+		if r.Method == "PROPFIND" && r.URL.Path == "/vault/oshell/" {
+			writeDAVCollection(w, r.URL.Path)
+			return
+		}
+		if r.URL.Path != "/vault/oshell/oshell-vault.json" {
 			http.NotFound(w, r)
 			return
 		}
@@ -56,6 +64,8 @@ func TestSharedWebDAVMultiNodeMergeAndStaleWrite(t *testing.T) {
 	ctx := context.Background()
 	a, ac, master := syncEngineFixture(t, server.URL)
 	b, bc, _ := syncEngineFixture(t, server.URL)
+	ac.Settings.FontSize, bc.Settings.FontSize = 18, 22
+	ac.SessionDefaults.SSHPort, bc.SessionDefaults.SSHPort = 2218, 2222
 	for _, engine := range []*SharedSyncEngine{a, b} {
 		transport, err := NewWebDAVTransport(server.URL+"/vault", "fixture-user", "fixture-password", true)
 		if err != nil {
@@ -89,6 +99,7 @@ func TestSharedWebDAVMultiNodeMergeAndStaleWrite(t *testing.T) {
 		return cfg
 	}
 	save(a, ac)
+	save(b, bc)
 	ac = commit(prepare(a, ac))
 	plan := prepare(b, bc)
 	if !plan.InitialChoiceRequired {
@@ -98,6 +109,9 @@ func TestSharedWebDAVMultiNodeMergeAndStaleWrite(t *testing.T) {
 		t.Fatal(err)
 	}
 	bc = commit(plan)
+	if bc.Settings.FontSize != 22 || bc.SessionDefaults.SSHPort != 2222 {
+		t.Fatal("WebDAV download changed local client settings")
+	}
 	ac.Profiles[0].Name, bc.Profiles[1].Name = "A edit", "B edit"
 	save(a, ac)
 	save(b, bc)
@@ -110,10 +124,13 @@ func TestSharedWebDAVMultiNodeMergeAndStaleWrite(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	bc.Settings.FontSize = 24
+	bc.Settings.LinksVisible = !bc.Settings.LinksVisible
+	save(b, bc)
 	bc = commit(prepare(b, bc))
 	after, err := b.Transport.Fetch(ctx)
 	if err != nil || before.ETag != after.ETag {
-		t.Fatal("unchanged WebDAV sync uploaded again", err)
+		t.Fatal("client-only WebDAV edit uploaded again", err)
 	}
 	ac = commit(prepare(a, ac))
 	bc.Profiles[1].Name = "B pending"

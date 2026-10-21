@@ -110,6 +110,25 @@ func TestNativeDragCancellationAndSourceRemoval(t *testing.T) {
 	}
 }
 
+func TestNativeDragFocusChangeKeepsTrackingUntilCompletion(t *testing.T) {
+	var results []transfer.Result
+	tt := coreNewTester(func(c *context) {
+		coreBox(c).Size(80, 40).DragData(transfer.TextData("tab"), transfer.DragOptions{
+			Operations: transfer.Move,
+			Done:       func(r transfer.Result) { results = append(results, r) },
+		})
+	}, 200, 200)
+	beginNativeDrag(tt)
+	tt.send(platform.SurfaceEvent{Kind: platform.SurfaceBlur})
+	if len(results) != 0 || tt.rt.drag == nil || !tt.rt.drag.native {
+		t.Fatal("cross-window focus change canceled native tracking")
+	}
+	tt.h.finishDataDrag(transfer.Result{Operation: transfer.Move})
+	if len(results) != 1 || results[0].Canceled || results[0].Operation != transfer.Move || tt.rt.drag != nil {
+		t.Fatalf("native completion after focus change: %+v", results)
+	}
+}
+
 func TestNativeDragCloseReleasesTextInputClient(t *testing.T) {
 	client := &primitiveClient{text: "draft", mark: &TextInputRange{Start: 0, End: 5}}
 	var results []transfer.Result

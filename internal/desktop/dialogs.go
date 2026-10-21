@@ -78,6 +78,7 @@ func (a *App) dialogs(c *ui.Context) {
 		a.keyPassword = ""
 	}
 	a.featureDialogs(c)
+	a.refreshAuthentication()
 }
 func (a *App) saveDraft(connect bool) {
 	if a.passwordLocked() || a.configurationBusy() || a.features.sessionPassword.busy {

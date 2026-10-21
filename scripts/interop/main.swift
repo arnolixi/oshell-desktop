@@ -64,9 +64,16 @@ if args[1] == "contract" {
  if args[1] == "directory-edit" { transport = DirectorySyncClient(directory:URL(fileURLWithPath:args[2])) }
  else { transport = try WebDAVClient(WebDAVSettings(address:args[2],username:"test-user",password:"test-password"),allowLoopbackHTTP:true) }
  let old = try transport.fetch()!
- var cfg = try SharedVault.decode(old.data,password:master); try validate(cfg)
+ let compatibility = try SharedVault.decode(old.data,password:master); try validate(compatibility)
+ var local = compatibility
+ local.preferences.fontSize = 21
+ local.sessionDefaults.sshPort = 2221
+ let applied = SessionSyncConfiguration.applying(compatibility, to: local)
+ try checked(applied.preferences.fontSize == 21 && applied.sessionDefaults.sshPort == 2221, "sync changed native local settings")
+ var cfg = try SessionSyncConfiguration.project(applied)
  cfg.profiles[0].name = "Swift 修改"
- let next = try SharedVault.encode(cfg,password:master)
+ let wire = try SessionSyncConfiguration.wireConfiguration(cfg, preserving: compatibility)
+ let next = try SharedVault.encode(wire,password:master)
  try transport.put(next,matching:old.etag)
  do { try transport.put(old.data,matching:old.etag); throw NSError(domain:"accepted stale write",code:1) }
  catch WebDAVFailure.conflict {}

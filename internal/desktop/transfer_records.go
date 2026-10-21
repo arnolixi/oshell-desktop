@@ -45,6 +45,7 @@ func bindTransferIdentity(f *fileState, identity core.SSHIdentity) {
 	if changed {
 		f.records = &transferLog{identity: identity, bound: true}
 		f.recordDetail = ""
+		f.notice = nil
 	}
 }
 
@@ -135,18 +136,23 @@ func (f *recordedFileSystem) run(ctx context.Context, source, target string, upl
 	}
 	sftp, canResume := f.RemoteFileSystem.(*core.SFTPFileSystem)
 	canResume = canResume && !replace
-	if canResume && r.checkpoint == nil {
-		var info os.FileInfo
-		var err error
-		if upload {
-			info, err = os.Lstat(source)
-		} else {
-			info, err = sftp.Lstat(source)
-		}
-		if err == nil && info.Mode().IsRegular() {
+	var info os.FileInfo
+	var statErr error
+	if upload {
+		info, statErr = os.Lstat(source)
+	} else if _, standalone := f.RemoteFileSystem.(*standaloneSCPFileSystem); !standalone {
+		info, statErr = f.RemoteFileSystem.Lstat(source)
+	}
+	total := int64(-1)
+	if statErr == nil && info != nil && info.Mode().IsRegular() {
+		total = info.Size()
+		if canResume && r.checkpoint == nil {
 			f.log.update(r, func() { r.checkpoint = &core.SFTPCheckpoint{Source: source, Target: target, Upload: upload} })
 		}
 	}
+	// Directories and standalone SCP downloads have no trustworthy total;
+	// display activity and transferred bytes without inventing a percentage.
+	f.task.beginNotice(source, f.protocol, r.ID, upload, total)
 	f.log.update(r, func() { r.Status = "传输中"; r.Error = ""; r.Resume = r.checkpoint != nil })
 	report := func(p core.TransferProgress) {
 		f.log.update(r, func() { r.Bytes = p.Bytes })

@@ -6,6 +6,7 @@ import (
 	"github.com/egoist/mygo/ui"
 	"oshell-desktop/internal/core"
 	"strconv"
+	"strings"
 )
 
 func (a *App) newBlank() {
@@ -33,7 +34,7 @@ func (a *App) livePropertiesDialog(c *ui.Context) {
 			ui.Text(c, "当前会话空闲保活").FontSize(18).Bold()
 			ui.Checkbox(c, &f.liveKeep.IdleEnabled, "空闲时发送文本")
 			ui.TextInput(c, &f.liveInterval).Label("间隔（秒）")
-			ui.TextInput(c, &f.liveKeep.IdleText).Label("发送文本（支持 \\n、\\t、\\xNN）")
+			ui.TextInput(c, &f.liveKeep.IdleText).Label(`发送文本（支持 \n、\r、\t、\e 和 \\）`)
 			ui.Text(c, "仅影响当前连接，不改写保存的会话配置。").TextColor(c.Theme().TextMuted)
 			if f.liveError != "" {
 				ui.Text(c, f.liveError).TextColor(c.Theme().Danger)
@@ -77,7 +78,22 @@ func (a *App) reconnectActive() {
 		return
 	}
 
-	begin := func() { a.features.reconnectTarget = p; a.request(p.profile, -1, p.terminalOnly) }
+	begin := func() {
+		profile := p.profile
+		// Saved keepalive options apply on a new connection. Reconnecting an
+		// existing tab must not silently retain its old disabled/default values.
+		// Keep the current host identity and one-off connections unchanged.
+		if !p.externalLaunch {
+			for _, saved := range a.config.Profiles {
+				if strings.EqualFold(saved.ID, profile.ID) && saved.Kind == profile.Kind && saved.Identity() == profile.Identity() {
+					profile.KeepAlive = saved.KeepAlive
+					break
+				}
+			}
+		}
+		a.features.reconnectTarget = p
+		a.request(profile, -1, p.terminalOnly)
+	}
 	if a.win == nil || p.term == nil || !p.term.Available() || (p.term.InLocalToolsMode() && !p.term.ToolsProcessActive()) {
 		begin()
 		return

@@ -26,6 +26,7 @@ func (a *App) invalidateSecurityWindows() {
 		}
 	}
 	for _, window := range apps {
+		window.features.sharedSync.loaded = false
 		if window.win != nil {
 			window.win.Invalidate()
 		}

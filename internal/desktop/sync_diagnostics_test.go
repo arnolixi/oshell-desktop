@@ -51,6 +51,13 @@ func TestSavedChangesQueueSyncWithoutLosingSuccessHistory(t *testing.T) {
 	if !a.changeConfig(func(cfg *core.Config) error { cfg.Settings.FontSize = original + 1; return nil }) {
 		t.Fatal(a.status)
 	}
+	clientOnly, err := diagnostic.Snapshot()
+	if err != nil || len(clientOnly.Entries) != len(before.Entries) || a.features.sharedSync.pendingLocal {
+		t.Fatal("client-only edit queued session synchronization", err)
+	}
+	if !a.changeConfig(func(cfg *core.Config) error { cfg.Directories = append(cfg.Directories, "new-directory"); return nil }) {
+		t.Fatal(a.status)
+	}
 	if !a.features.sharedSync.pendingLocal || a.features.sharedSync.phase != core.SyncQueued {
 		t.Fatal("saved change did not queue status")
 	}
@@ -105,7 +112,7 @@ func TestSyncDiagnosticsShowsMemoryFallbackAndHistory(t *testing.T) {
 	a.prepareSettings()
 	a.features.settingsTab = 3
 	tt := ui.NewTester(a.settingsView, 800, 650)
-	if !tt.HasText("已与共享数据对齐") {
+	if !tt.HasText("已与本机同步目录对齐") {
 		t.Fatal("logging failure hid successful sync state")
 	}
 	snapshot(t, tt, "sync-status-memory-fallback.png")

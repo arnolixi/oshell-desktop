@@ -564,6 +564,8 @@ type reader struct {
 	err       error
 }
 
+var errActivityTimeout = errors.New("ZMODEM activity timeout - no progress")
+
 func newReader(conn net.Conn) *reader {
 	r := &reader{conn: conn, done: make(chan struct{})}
 	r.cond = sync.NewCond(&r.mu)
@@ -634,7 +636,7 @@ func (r *reader) readByte(timeout time.Duration) (byte, error) {
 		}
 		remaining := time.Until(deadline)
 		if remaining <= 0 {
-			return 0, fmt.Errorf("ZMODEM activity timeout - no progress")
+			return 0, errActivityTimeout
 		}
 		// Wait with a guard goroutine that broadcasts on timeout expiry.
 		timer := time.AfterFunc(remaining, func() {

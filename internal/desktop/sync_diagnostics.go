@@ -33,33 +33,26 @@ func syncDate(value *time.Time) string {
 	return value.Local().Format("2006-01-02 15:04:05")
 }
 func (a *App) syncStatusCard(c *ui.Context) {
-	f := &a.features.sharedSync
-	title := "等待检查"
-	switch {
-	case !f.savedEnabled:
-		title = "未启用同步"
-	case a.passwordLocked():
-		title = "已锁定 · 等待主密码"
-	case f.busy:
-		title = f.phase.Title()
-		if title == "" {
-			title = "正在同步"
-		}
-	case f.pendingDraft || f.plan != nil && len(f.plan.Conflicts) > 0:
-		title = "存在冲突 · 等待确认"
-	case f.phase == core.SyncFailed:
-		title = "同步失败，本地数据保留"
-	case f.phase == core.SyncCancelled:
-		title = "本次同步已取消"
-	case f.pendingLocal:
-		title = "等待同步"
-	case f.summary.LastSuccess != nil:
-		title = "已与共享数据对齐"
-	}
+	owner := a.syncStatusOwner()
+	f := &owner.features.sharedSync
+	p := a.syncPresentation(c)
+	title := p.title
 	ui.Column(c).Padding(12).Gap(7).FillWidth().Background(c.Theme().Surface).Radius(4).Children(func() {
-		ui.Text(c, title).FontSize(16).Bold()
+		ui.Text(c, p.mark+" "+title).FontSize(16).Bold().TextColor(p.color)
+		ui.Text(c, p.guidance).Wrap()
+		if a.syncOptionsChanged() {
+			ui.Text(c, "下方设置尚未应用；此卡片显示已保存配置的状态。").Wrap()
+		}
+		if a.passwordLocked() {
+			ui.Button(c, "解锁主密码…").OnClick(a.showVault)
+		}
+		if f.phase == core.SyncFailed && f.status != "" {
+			ui.Text(c, f.status).Wrap().TextColor(c.Theme().Danger)
+		}
 		backend := "同步目录"
-		if f.diagnostics.Backend == "webdav" {
+		if !f.savedEnabled {
+			backend = "仅本机"
+		} else if f.diagnostics.Backend == "webdav" {
 			backend = "WebDAV"
 		}
 		ui.Text(c, backend+" · 使用已保存的同步配置").TextColor(c.Theme().TextMuted)
@@ -70,7 +63,7 @@ func (a *App) syncStatusCard(c *ui.Context) {
 		}
 		ui.Text(c, pending).FontSize(11)
 		ui.Row(c).Gap(8).Children(func() {
-			ui.Button(c, "查看同步日志…").OnClick(func() { a.loadSyncDiagnostics(); f.logsOpen = true })
+			ui.Button(c, "查看同步日志…").OnClick(func() { a.loadSyncDiagnostics(); a.features.sharedSync.logsOpen = true })
 			ui.Button(c, "导出诊断日志…").Disabled(f.logExportBusy).OnClick(a.exportSyncDiagnostics)
 		})
 		if f.logIssue != "" {
@@ -188,6 +181,9 @@ func (a *App) markSharedSyncChanged() {
 		}
 		if owner.preferencesWindow != nil {
 			owner.preferencesWindow.Invalidate()
+		}
+		if owner.win != nil {
+			owner.win.Invalidate()
 		}
 	}
 }

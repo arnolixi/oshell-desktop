@@ -93,7 +93,7 @@ func (s *Store) commitCredentials(ctx context.Context, cfg Config, v *Vault, upd
 	v.mu.Lock()
 	defer v.mu.Unlock()
 	if expectedVaultRevision != "" && v.revisionLocked() != expectedVaultRevision {
-		return fmt.Errorf("密码库已被修改，请重新同步")
+		return ErrVaultChanged
 	}
 	if s.pending || v.blocked {
 		return ErrPendingTransaction

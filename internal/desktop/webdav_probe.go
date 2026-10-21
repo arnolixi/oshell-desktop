@@ -46,7 +46,7 @@ func (a *App) testWebDAVConnection() {
 			}
 		}
 	}
-	transport, err := core.NewWebDAVTransport(options.Address, options.Username, password, false)
+	transport, err := options.Transport(password, a.store.Dir)
 	if err != nil {
 		f.probeStatus = err.Error()
 		return
@@ -59,7 +59,16 @@ func (a *App) testWebDAVConnection() {
 	f.probeStatus = "正在测试 WebDAV 连接…"
 	go func() {
 		started := time.Now()
-		err := transport.Probe(ctx)
+		webdav := transport.(*core.WebDAVTransport)
+		err := webdav.Probe(ctx)
+		directory := ""
+		if err == nil {
+			if resolved, resolveErr := webdav.SyncDirectory(ctx); resolveErr != nil {
+				err = resolveErr
+			} else {
+				directory = resolved.Path
+			}
+		}
 		cancel()
 		logErr := (core.SyncDiagnostics{Directory: a.store.Dir, Target: options.Target(), Backend: "webdav"}).Record(core.SyncConnectionTest, true, time.Since(started), err, "")
 		a.post(func() {
@@ -75,7 +84,7 @@ func (a *App) testWebDAVConnection() {
 			if err != nil {
 				f.probeStatus = err.Error()
 			} else {
-				f.probeStatus = "目录响应正常；实际写入会检查服务器版本条件。"
+				f.probeStatus = "连接正常；同步目录：" + directory + "。点击应用保存；实际写入仍校验版本条件。"
 			}
 			if logErr != nil {
 				f.logIssue = logErr.Error()
