@@ -36,18 +36,27 @@ func TestSessionTypeIconsAndLinkOrigin(t *testing.T) {
 			snapshot(t, view, "session-types-"+mode+".png")
 			for _, kind := range []string{"ssh", "local", "sftp", "ftp"} {
 				label := sessionIconFor(kind, false, false, false).label
-				if r, ok := view.Find(label); !ok || r.W != 20 || r.H != 20 {
-					t.Fatalf("missing 20-point %s icon: %+v", kind, r)
+				if r, ok := view.Find(label); !ok || r.W != 36 || r.H != 20 {
+					t.Fatalf("missing 36 × 20-point %s marker: %+v", kind, r)
 				}
 			}
+			for _, badge := range []string{"SSH", "SFTP", "FTP"} {
+				if _, ok := view.Find(badge); !ok {
+					t.Fatalf("missing protocol text %s", badge)
+				}
+			}
+			a.managerSelection.Add(cfg.Profiles[0].ID)
+			a.sidebar.selected = cfg.Profiles[0].ID
+			view.Frame()
+			snapshot(t, view, "session-types-selected-"+mode+".png")
 			entries, _ := sidebarEntries(cfg, "")
 			for _, e := range entries {
 				style := sidebarSessionStyle(e)
-				if e.id == actual.ID && style.image != sessionSSHIcon {
+				if e.id == actual.ID && style.badge != "SSH" {
 					t.Fatal("actual session in Links became a shortcut")
 				}
 				if strings.HasPrefix(e.id, "link:") {
-					if style.image != linkIcon || !strings.Contains(sessionListTooltip(e.profile, true), "来源：/服务器/SSH 示例") {
+					if style.image != linkIcon || style.badge != "" || !strings.Contains(sessionListTooltip(e.profile, true), "来源：/服务器/SSH 示例") {
 						t.Fatal("shortcut lost identity or origin")
 					}
 				}

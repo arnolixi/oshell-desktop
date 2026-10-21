@@ -10,37 +10,36 @@ import (
 
 // Presentation only: shared session types and configuration stay unchanged.
 var (
-	sessionSSHIcon    = glyph(`<rect x="2" y="2" width="16" height="16" rx="2"/><path d="M2 13h16M5 6l3 2-3 2m6 0h3"/><circle cx="5.5" cy="15.5" r=".6"/><circle cx="8.5" cy="15.5" r=".6"/>`)
 	sessionLocalIcon  = glyph(`<rect x="4" y="3" width="12" height="10" rx="1.5"/><path d="m4 13-2 4h16l-2-4"/>`)
 	sessionFolderIcon = glyph(`<path d="M2 17V3h6l2 2h8v12z"/>`)
-	sessionSFTPIcon   = glyph(`<path d="M2 17V3h6l2 2h8v12z"/><rect x="6" y="10" width="8" height="5" rx="1"/><path d="M7.5 10V9a2.5 2.5 0 0 1 5 0v1m-2.5 2v1"/>`)
-	sessionFTPIcon    = glyph(`<path d="M2 17V3h6l2 2h8v12zM6 9h8l-2-2m2 2-2 2M14 13H6l2-2m-2 2 2 2"/>`)
 	sessionParentIcon = glyph(`<path d="M16 15V9H4m4-4L4 9l4 4"/>`)
 )
 
 type sessionIconStyle struct {
 	image              *ui.SVG
 	label, light, dark string
+	badge              string
 }
 
 func sessionIconFor(kind string, shortcut, folder, parent bool) sessionIconStyle {
 	if parent {
-		return sessionIconStyle{sessionParentIcon, "上一级目录", "#666B75", "#B3B8C2"}
+		return sessionIconStyle{image: sessionParentIcon, label: "上一级目录", light: "#666B75", dark: "#B3B8C2"}
 	}
 	if folder {
-		return sessionIconStyle{sessionFolderIcon, "目录", "#9C6E1F", "#E8BA5C"}
+		return sessionIconStyle{image: sessionFolderIcon, label: "目录", light: "#9C6E1F", dark: "#E8BA5C"}
 	}
-	style := sessionIconStyle{sessionSSHIcon, "SSH · 远程终端", "#1F66BF", "#66B0FF"}
+	style := sessionIconStyle{badge: "SSH", label: "SSH · 远程终端", light: "#1F66BF", dark: "#80B5FF"}
 	switch kind {
 	case "local":
-		style = sessionIconStyle{sessionLocalIcon, "本地终端", "#8252B8", "#C29CF7"}
+		style = sessionIconStyle{image: sessionLocalIcon, label: "本地终端", light: "#8252B8", dark: "#C29CF7"}
 	case "sftp":
-		style = sessionIconStyle{sessionSFTPIcon, "SFTP · 安全文件传输", "#1F8257", "#63C99C"}
+		style = sessionIconStyle{badge: "SFTP", label: "SFTP · 安全文件传输", light: "#1B7C50", dark: "#70D6A5"}
 	case "ftp":
-		style = sessionIconStyle{sessionFTPIcon, "FTP · 文件传输", "#B85C1A", "#FFA861"}
+		style = sessionIconStyle{badge: "FTP", label: "FTP · 文件传输", light: "#A95312", dark: "#FFB573"}
 	}
 	if shortcut {
 		style.image, style.light, style.dark = linkIcon, "#057D91", "#5CCFE0"
+		style.badge = ""
 		style.label = "Link · 快捷引用 · " + style.label
 	}
 	return style
@@ -51,10 +50,22 @@ func (s sessionIconStyle) draw(c *ui.Context, selected bool) {
 	if c.Theme().Dark {
 		color = ui.Hex(s.dark)
 	}
+	if s.badge != "" {
+		// An opaque theme base keeps the badge legible on selected rows too.
+		ui.Box(c).Size(36, 20).Shrink(0).Radius(5).Background(c.Theme().Background).Label(s.label).Children(func() {
+			ui.Row(c).Fill().AlignItems(ui.Center).Justify(ui.Center).Radius(5).
+				Background(color.Alpha(0.10)).Border(1, color.Alpha(0.30)).Children(func() {
+				ui.Text(c, s.badge).FontSize(10).FontWeight(600).SingleLine().TextColor(color)
+			})
+		})
+		return
+	}
 	if selected {
 		color = c.Theme().AccentText
 	}
-	ui.Icon(c, s.image).FontSize(20).Size(20, 20).Shrink(0).TextColor(color).Label(s.label)
+	ui.Row(c).Size(36, 20).Shrink(0).AlignItems(ui.Center).Justify(ui.Center).Label(s.label).Children(func() {
+		ui.Icon(c, s.image).FontSize(20).Size(20, 20).Shrink(0).TextColor(color)
+	})
 }
 
 func sessionListTooltip(p core.Profile, shortcut bool) string {
@@ -69,8 +80,10 @@ func sessionTreeItem(c *ui.Context, name string, open *bool, children func(), se
 	// Keep the toolkit's arrow, keyboard navigation and tree accessibility;
 	// append the shared icon/name presentation after its empty label.
 	return ui.TreeItem(c, "", open, children).Label(name).Selected(selected).MinWidth(0).Children(func() {
-		style.draw(c, selected)
-		ui.Text(c, name).SingleLine().Grow(1).MinWidth(0)
+		ui.Row(c).Grow(1).MinWidth(0).Gap(7).AlignItems(ui.Center).Children(func() {
+			style.draw(c, selected)
+			ui.Text(c, name).SingleLine().Grow(1).MinWidth(0)
+		})
 	})
 }
 
